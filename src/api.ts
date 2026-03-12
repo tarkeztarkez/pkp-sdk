@@ -1,5 +1,12 @@
 import { PortalSession, type Station } from "./client";
-import { parseDelayResults, parseDisruptions, parseRoutes, parseStationBoard } from "./parsers";
+import { getTrainConsists } from "./intercity";
+import {
+  parseDelayResults,
+  parseDisruptions,
+  parseRoutes,
+  parseStationBoard,
+  type TrainConsistEntry,
+} from "./parsers";
 
 export type StationsResponse = {
   query: string;
@@ -78,6 +85,21 @@ export type DisruptionsResponse = {
   date: string;
   count: number;
   disruptions: ReturnType<typeof parseDisruptions>;
+};
+
+export type TrainConsistsResponse = {
+  query: {
+    station: string;
+    train: string;
+  };
+  station: {
+    name: string;
+    pdfUrl: string;
+  };
+  validFrom: string;
+  validTo: string;
+  count: number;
+  matches: TrainConsistEntry[];
 };
 
 export async function searchStations(query: string): Promise<StationsResponse> {
@@ -259,6 +281,13 @@ export async function searchDisruptions(input: {
     count: results.length,
     disruptions: results,
   };
+}
+
+export async function searchTrainConsists(input: {
+  station: string;
+  train: string;
+}): Promise<TrainConsistsResponse> {
+  return getTrainConsists(input);
 }
 
 export function normalizeDate(value: string) {

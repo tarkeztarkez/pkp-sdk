@@ -9,6 +9,7 @@ bun run index.ts stations "Warszawa"
 bun run index.ts stations "Warszawa" --json
 bun run index.ts routes --from "Warszawa Centralna" --to "Kraków Główny"
 bun run index.ts routes --from "Warszawa Centralna" --to "Kraków Główny" --json
+bun run index.ts train-consists "1510" --station "Warszawa Centralna"
 bun run index.ts departures "Warszawa Centralna"
 bun run index.ts arrivals "Warszawa Centralna"
 bun run index.ts delays --from "Warszawa Centralna" --to "Kraków Główny"
@@ -36,9 +37,18 @@ Available endpoints:
 - `GET /delays?station=Warszawa%20Centralna`
 - `GET /delays?from=Warszawa%20Centralna&to=Krak%C3%B3w%20G%C5%82%C3%B3wny`
 - `GET /disruptions?station=Warszawa%20Centralna`
+- `GET /train-consists?station=Warszawa%20Centralna&train=1510`
 - `GET /openapi.json`
 
 The server enables permissive CORS and exposes an OpenAPI 3.1 document at `/openapi.json`.
+
+## Intercity Train Consists
+
+`train-consists` uses the public PKP Intercity station PDF list at `zestawienia-pociagow.html`, downloads the matching station PDF, runs `pdftotext -tsv`, and returns parsed train consist data instead of a raw PDF link.
+
+The parser currently returns the train block metadata, the raw consist diagram line, and a left-to-right sequence so carriage order is available programmatically.
+
+This feature requires the `pdftotext` binary to be installed on the system.
 
 ## Docker
 

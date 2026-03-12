@@ -42,6 +42,43 @@ export type StationBoardEntry = {
   difficulties: string[];
 };
 
+type TsvWord = {
+  page: number;
+  left: number;
+  top: number;
+  width: number;
+  text: string;
+};
+
+type WordLine = {
+  page: number;
+  top: number;
+  words: TsvWord[];
+  text: string;
+  minLeft: number;
+};
+
+export type TrainConsistSequenceItem = {
+  raw: string;
+  kind: "carriage" | "marker";
+  carriageNumber: string;
+  noteNumber: string;
+};
+
+export type TrainConsistEntry = {
+  page: number;
+  departureTime: string;
+  platform: string;
+  track: string;
+  trainNumber: string;
+  trainName: string;
+  destinations: string[];
+  relation: string;
+  consistRaw: string;
+  sequence: TrainConsistSequenceItem[];
+  notes: string[];
+};
+
 export function parseRoutes(html: string): RouteResult[] {
   const $ = load(html);
 
@@ -164,4 +201,244 @@ export function parseDifficulties(value: string) {
   }
 
   return output;
+}
+
+export function parseTrainConsistsTsv(tsv: string) {
+  const words = parseTsvWords(tsv);
+  const dates = Array.from(
+    new Set(
+      words
+        .filter((word) => word.page === 1 && word.top < 120)
+        .map((word) => cleanText(word.text))
+        .filter((text) => /^\d{2}\.\d{2}\.\d{4}$/.test(text)),
+    ),
+  );
+
+  const pages = new Map<number, TsvWord[]>();
+  for (const word of words) {
+    const bucket = pages.get(word.page) ?? [];
+    bucket.push(word);
+    pages.set(word.page, bucket);
+  }
+
+  const entries: TrainConsistEntry[] = [];
+
+  for (const [pageNumber, pageWords] of pages) {
+    const lines = groupWordLines(pageWords);
+    const timeWords = pageWords
+      .filter((word) => TIME_PATTERN.test(word.text) && word.left >= 140 && word.left <= 220)
+      .sort((left, right) => left.top - right.top);
+
+    for (let index = 0; index < timeWords.length; index++) {
+      const timeWord = timeWords[index];
+      if (!timeWord) {
+        continue;
+      }
+      const nextTime = timeWords[index + 1];
+      const startTop = timeWord.top - 18;
+      const endTop = (nextTime?.top ?? Number.POSITIVE_INFINITY) - 8;
+      const blockLines = lines.filter((line) => line.top >= startTop && line.top < endTop);
+      const blockWords = pageWords.filter((word) => word.top >= startTop && word.top < endTop);
+      const headerLines = blockLines.filter((line) => line.top >= timeWord.top - 16 && line.top <= timeWord.top + 24);
+      const headerWords = blockWords.filter((word) => word.top >= timeWord.top - 16 && word.top <= timeWord.top + 24);
+
+      const platformTrackLines = unique(
+        headerWords
+          .filter((word) => word.left >= 240 && word.left <= 290 && /^\d+$/.test(word.text))
+          .sort((left, right) => left.top - right.top || left.left - right.left)
+          .map((word) => word.text),
+      );
+
+      const trainLines = groupWordLines(headerWords.filter((word) => word.left >= 300 && word.left <= 440))
+        .map((line) => line.text)
+        .filter(Boolean);
+
+      const numberLineIndex = trainLines.findIndex((line) => /\d/.test(line));
+      if (numberLineIndex < 0) {
+        continue;
+      }
+
+      const { trainNumber, trainName } = parseTrainLabel(trainLines, numberLineIndex);
+      if (!trainNumber) {
+        continue;
+      }
+
+      const destinationLines = groupWordLines(headerWords.filter((word) => word.left >= 395 && word.left <= 530))
+        .map((line) => line.text)
+        .filter((line) => hasLetters(line) && !line.includes("objętych rezerwacją"));
+
+      const rightLines = blockLines.filter((line) => line.minLeft >= 540);
+      const consistCandidate = pickConsistLine(rightLines);
+      const consistRaw = consistCandidate?.text ?? "";
+      const relation = rightLines.find((line) => line.text.includes("|"))?.text ?? "";
+      const notes = rightLines
+        .filter((line) => line !== consistCandidate && line.text !== relation)
+        .map((line) => line.text)
+        .filter((line) => hasLetters(line) && !TIME_RANGE_PATTERN.test(line));
+
+      entries.push({
+        page: pageNumber,
+        departureTime: timeWord.text,
+        platform: platformTrackLines[0] ?? "",
+        track: platformTrackLines[1] ?? "",
+        trainNumber,
+        trainName,
+        destinations: unique(destinationLines),
+        relation: relation.replace(/\s+/g, " ").trim(),
+        consistRaw,
+        sequence: parseConsistSequence(consistCandidate?.words ?? []),
+        notes: unique(notes),
+      });
+    }
+  }
+
+  return {
+    validFrom: dates[0] ?? "",
+    validTo: dates[1] ?? "",
+    entries,
+  };
+}
+
+const TIME_PATTERN = /^\d{1,2}:\d{2}$/;
+const TIME_RANGE_PATTERN = /^\d{1,2}:\d{2}-\d{1,2}:\d{2}$/;
+
+function parseTsvWords(tsv: string): TsvWord[] {
+  return tsv
+    .split(/\r?\n/)
+    .slice(1)
+    .map((line) => line.split("\t"))
+    .filter((columns) => columns[0] === "5" && columns.length >= 12 && columns[11])
+    .map((columns) => ({
+      page: Number.parseInt(columns[1] ?? "0", 10),
+      left: Number.parseFloat(columns[6] ?? "0"),
+      top: Number.parseFloat(columns[7] ?? "0"),
+      width: Number.parseFloat(columns[8] ?? "0"),
+      text: cleanText(columns[11] ?? ""),
+    }))
+    .filter((word) => word.page > 0 && word.text);
+}
+
+function groupWordLines(words: TsvWord[]): WordLine[] {
+  const sorted = [...words].sort((left, right) => left.top - right.top || left.left - right.left);
+  const lines: WordLine[] = [];
+
+  for (const word of sorted) {
+    const last = lines.at(-1);
+    if (!last || last.page !== word.page || Math.abs(last.top - word.top) > 2.4) {
+      lines.push({
+        page: word.page,
+        top: word.top,
+        words: [word],
+        text: "",
+        minLeft: word.left,
+      });
+      continue;
+    }
+
+    last.words.push(word);
+    last.minLeft = Math.min(last.minLeft, word.left);
+  }
+
+  for (const line of lines) {
+    line.words.sort((left, right) => left.left - right.left);
+    line.text = line.words.map((word) => word.text).join(" ").replace(/\s+/g, " ").trim();
+  }
+
+  return lines;
+}
+
+function parseTrainLabel(lines: string[], numberLineIndex: number) {
+  const numberLine = lines[numberLineIndex] ?? "";
+  const combined = cleanText(lines.join(" "));
+  const categoryMatch = combined.match(/\b(?:EIP|EIC|EC|IC|TLK|EN|IR)\s+([0-9]+(?:\/[0-9]+)*)/);
+  const numberMatch = numberLine.match(/([0-9]+(?:\/[0-9]+)*)/);
+  const trainNumber = cleanText(categoryMatch?.[1] ?? numberMatch?.[1] ?? numberLine);
+  const trainName = cleanText(
+    lines
+      .filter((_, index) => index !== numberLineIndex)
+      .map((line) => line.replace(/[*()]/g, " "))
+      .join(" "),
+  );
+
+  return { trainNumber, trainName };
+}
+
+function pickConsistLine(lines: WordLine[]) {
+  let best: WordLine | null = null;
+  let bestScore = 0;
+
+  for (const line of lines) {
+    const score = countConsistWords(line.words);
+    if (score > bestScore) {
+      best = line;
+      bestScore = score;
+    }
+  }
+
+  return bestScore >= 3 ? best : null;
+}
+
+function countConsistWords(words: TsvWord[]) {
+  const consistWords = words.filter((word) => isConsistWord(word.text)).length;
+  const letterWords = words.filter((word) => hasLetters(word.text)).length;
+  return consistWords * 10 - letterWords * 8;
+}
+
+function parseConsistSequence(words: TsvWord[]): TrainConsistSequenceItem[] {
+  const sorted = [...words].sort((left, right) => left.left - right.left);
+  const output: TrainConsistSequenceItem[] = [];
+
+  for (let index = 0; index < sorted.length; index++) {
+    const current = sorted[index];
+    if (!current || !isConsistWord(current.text)) {
+      continue;
+    }
+
+    let raw = current.text;
+    const next = sorted[index + 1];
+    if (
+      next &&
+      /^\d+\)$/.test(next.text) &&
+      /^\d+$/.test(current.text) &&
+      next.left - (current.left + current.width) < 18
+    ) {
+      raw = `${current.text}${next.text}`;
+      index++;
+    }
+
+    output.push({
+      raw,
+      kind: raw.includes("_") || !/\d/.test(raw) ? "marker" : "carriage",
+      carriageNumber: extractCarriageNumber(raw),
+      noteNumber: extractNoteNumber(raw),
+    });
+  }
+
+  return output;
+}
+
+function extractCarriageNumber(value: string) {
+  const clean = value.replace(/^[^0-9]+/, "");
+  const noteMatch = clean.match(/^(\d+)(\d\))$/);
+  if (noteMatch) {
+    return noteMatch[1] ?? "";
+  }
+
+  return clean.match(/\d+/)?.[0] ?? "";
+}
+
+function extractNoteNumber(value: string) {
+  return value.match(/(\d)\)$/)?.[1] ?? "";
+}
+
+function isConsistWord(text: string) {
+  return /^[<>=_`}{\[\])]+$/.test(text) || /^\d{1,3}$/.test(text) || /^\d{1,3}\d\)$/.test(text) || /^\d\)$/.test(text);
+}
+
+function hasLetters(value: string) {
+  return /\p{L}/u.test(value);
+}
+
+function unique(values: string[]) {
+  return Array.from(new Set(values.map((value) => cleanText(value)).filter(Boolean)));
 }

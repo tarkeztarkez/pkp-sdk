@@ -8,6 +8,7 @@ import {
   searchDisruptions,
   searchRoutes,
   searchStations,
+  searchTrainConsists,
   searchTrainNumbers,
   todayLocalDate,
 } from "./api";
@@ -48,6 +49,9 @@ export async function runCli(argv: string[]) {
         break;
       case "disruptions":
         await handleDisruptions(flags);
+        break;
+      case "train-consists":
+        await handleTrainConsists(positionals, flags);
         break;
       case "server":
         await handleServer(rest);
@@ -244,6 +248,49 @@ async function handleDisruptions(flags: Map<string, FlagValue>) {
   }
 }
 
+async function handleTrainConsists(positionals: string[], flags: Map<string, FlagValue>) {
+  const train = requireValue(firstPositionalOrFlag(positionals, flags, "train"), "train");
+  const station = requireValue(flagString(flags, "station"), "--station");
+  const response = await searchTrainConsists({ station, train });
+
+  if (flagBool(flags, "json")) {
+    printJson(response);
+    return;
+  }
+
+  printSection(`Train consists for ${train} at ${response.station.name}`, response.count, [
+    response.validFrom || response.validTo
+      ? `Valid: ${joinNonEmpty([response.validFrom, response.validTo ? `to ${response.validTo}` : ""])}`
+      : "",
+    `Source PDF: ${response.station.pdfUrl}`,
+  ]);
+  if (response.matches.length === 0) {
+    printEmpty("No matching train consist found in the station PDF.");
+    return;
+  }
+
+  for (const item of response.matches) {
+    const carriages = item.sequence
+      .filter((part) => part.kind === "carriage")
+      .map((part) => formatConsistCarriage(part.carriageNumber, part.noteNumber))
+      .join(" -> ");
+    const markersDetected = item.sequence.some((part) => part.kind === "marker");
+
+    printEntry(
+      [
+        `${item.departureTime}  Train: ${joinNonEmpty([item.trainNumber, item.trainName])}`,
+        `Platform/track: ${fallbackText(item.platform)}/${fallbackText(item.track)}`,
+        item.destinations.length > 0 ? `Destinations: ${item.destinations.join("; ")}` : "",
+        item.relation ? `Relation: ${item.relation}` : "",
+        carriages ? `Carriages: ${carriages}` : "",
+        markersDetected ? "Diagram markers: present in source PDF, omitted from CLI view" : "",
+        item.notes.length > 0 ? `Notes: ${item.notes.join("; ")}` : "",
+      ],
+      true,
+    );
+  }
+}
+
 async function handleServer(args: string[]) {
   const [subcommand, ...rest] = args;
   if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
@@ -270,6 +317,7 @@ function printHelp() {
 Commands:
   stations <query> [--json]
   train-numbers <query> [--json]
+  train-consists <train> --station <station> [--json]
   routes --from <station> --to <station> [--date DD.MM.YYYY] [--time HH:MM] [--arrival] [--min-change N] [--direct] [--json]
   departures <station> [--page N] [--json]
   arrivals <station> [--page N] [--json]
@@ -383,4 +431,12 @@ function fallbackText(value: string) {
 
 function joinNonEmpty(values: string[]) {
   return values.map(cleanText).filter(Boolean).join(" ");
+}
+
+function formatConsistCarriage(carriageNumber: string, noteNumber: string) {
+  if (!carriageNumber) {
+    return "";
+  }
+
+  return noteNumber ? `${carriageNumber}(${noteNumber})` : carriageNumber;
 }
