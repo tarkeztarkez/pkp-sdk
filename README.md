@@ -46,7 +46,7 @@ The server enables permissive CORS and exposes an OpenAPI 3.1 document at `/open
 
 `train-consists` uses the public PKP Intercity station PDF list at `zestawienia-pociagow.html`, downloads the matching station PDF, runs `pdftotext -tsv`, and returns parsed train consist data instead of a raw PDF link.
 
-The parser currently returns the train block metadata, the raw consist diagram line, and a left-to-right sequence so carriage order is available programmatically.
+The response shape groups results into train matches with nested `variants`, so a single train block can expose multiple possible zestawienia with separate validity notes, diagram lines, and left-to-right carriage sequences.
 
 This feature requires the `pdftotext` binary to be installed on the system.
 

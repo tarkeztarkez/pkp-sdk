@@ -406,6 +406,27 @@ function buildOpenApiDocument(host: string, port: number) {
           required: ["raw", "kind", "carriageNumber", "noteNumber"],
           additionalProperties: false,
         },
+        TrainConsistVariant: {
+          type: "object",
+          properties: {
+            relation: { type: "string" },
+            consistRaw: { type: "string" },
+            sequence: {
+              type: "array",
+              items: schemaRef("TrainConsistSequenceItem"),
+            },
+            validity: {
+              type: "array",
+              items: { type: "string" },
+            },
+            notes: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+          required: ["relation", "consistRaw", "sequence", "validity", "notes"],
+          additionalProperties: false,
+        },
         TrainConsistEntry: {
           type: "object",
           properties: {
@@ -419,30 +440,12 @@ function buildOpenApiDocument(host: string, port: number) {
               type: "array",
               items: { type: "string" },
             },
-            relation: { type: "string" },
-            consistRaw: { type: "string" },
-            sequence: {
+            variants: {
               type: "array",
-              items: schemaRef("TrainConsistSequenceItem"),
-            },
-            notes: {
-              type: "array",
-              items: { type: "string" },
+              items: schemaRef("TrainConsistVariant"),
             },
           },
-          required: [
-            "page",
-            "departureTime",
-            "platform",
-            "track",
-            "trainNumber",
-            "trainName",
-            "destinations",
-            "relation",
-            "consistRaw",
-            "sequence",
-            "notes",
-          ],
+          required: ["page", "departureTime", "platform", "track", "trainNumber", "trainName", "destinations", "variants"],
           additionalProperties: false,
         },
         TrainConsistsQuery: {
@@ -471,12 +474,13 @@ function buildOpenApiDocument(host: string, port: number) {
             validFrom: { type: "string" },
             validTo: { type: "string" },
             count: { type: "integer" },
+            variantCount: { type: "integer" },
             matches: {
               type: "array",
               items: schemaRef("TrainConsistEntry"),
             },
           },
-          required: ["query", "station", "validFrom", "validTo", "count", "matches"],
+          required: ["query", "station", "validFrom", "validTo", "count", "variantCount", "matches"],
           additionalProperties: false,
         },
         ServerIndexResponse: {

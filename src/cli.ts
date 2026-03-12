@@ -262,6 +262,7 @@ async function handleTrainConsists(positionals: string[], flags: Map<string, Fla
     response.validFrom || response.validTo
       ? `Valid: ${joinNonEmpty([response.validFrom, response.validTo ? `to ${response.validTo}` : ""])}`
       : "",
+    `Variants: ${response.variantCount}`,
     `Source PDF: ${response.station.pdfUrl}`,
   ]);
   if (response.matches.length === 0) {
@@ -270,24 +271,35 @@ async function handleTrainConsists(positionals: string[], flags: Map<string, Fla
   }
 
   for (const item of response.matches) {
-    const carriages = item.sequence
-      .filter((part) => part.kind === "carriage")
-      .map((part) => formatConsistCarriage(part.carriageNumber, part.noteNumber))
-      .join(" -> ");
-    const markersDetected = item.sequence.some((part) => part.kind === "marker");
-
     printEntry(
       [
         `${item.departureTime}  Train: ${joinNonEmpty([item.trainNumber, item.trainName])}`,
         `Platform/track: ${fallbackText(item.platform)}/${fallbackText(item.track)}`,
         item.destinations.length > 0 ? `Destinations: ${item.destinations.join("; ")}` : "",
-        item.relation ? `Relation: ${item.relation}` : "",
-        carriages ? `Carriages: ${carriages}` : "",
-        markersDetected ? "Diagram markers: present in source PDF, omitted from CLI view" : "",
-        item.notes.length > 0 ? `Notes: ${item.notes.join("; ")}` : "",
+        `Variants: ${item.variants.length}`,
       ],
       true,
     );
+
+    for (const [index, variant] of item.variants.entries()) {
+      const carriages = variant.sequence
+        .filter((part) => part.kind === "carriage")
+        .map((part) => formatConsistCarriage(part.carriageNumber, part.noteNumber))
+        .join(" -> ");
+      const markersDetected = variant.sequence.some((part) => part.kind === "marker");
+
+      printEntry(
+        [
+          `Variant ${index + 1}`,
+          variant.validity.length > 0 ? `Validity: ${variant.validity.join("; ")}` : "",
+          variant.relation ? `Relation: ${variant.relation}` : "",
+          carriages ? `Carriages: ${carriages}` : "",
+          markersDetected ? "Diagram markers: present in source PDF, omitted from CLI view" : "",
+          variant.notes.length > 0 ? `Notes: ${variant.notes.join("; ")}` : "",
+        ],
+        true,
+      );
+    }
   }
 }
 

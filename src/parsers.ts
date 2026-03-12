@@ -73,9 +73,14 @@ export type TrainConsistEntry = {
   trainNumber: string;
   trainName: string;
   destinations: string[];
+  variants: TrainConsistVariant[];
+};
+
+export type TrainConsistVariant = {
   relation: string;
   consistRaw: string;
   sequence: TrainConsistSequenceItem[];
+  validity: string[];
   notes: string[];
 };
 
@@ -284,10 +289,12 @@ export function parseTrainConsistsTsv(tsv: string) {
         trainNumber,
         trainName,
         destinations: unique(destinationLines),
-        relation: relation.replace(/\s+/g, " ").trim(),
-        consistRaw,
-        sequence: parseConsistSequence(consistCandidate?.words ?? []),
-        notes: unique(notes),
+        variants: buildTrainConsistVariants({
+          relation: relation.replace(/\s+/g, " ").trim(),
+          consistRaw,
+          sequence: parseConsistSequence(consistCandidate?.words ?? []),
+          notes: unique(notes),
+        }),
       });
     }
   }
@@ -417,6 +424,36 @@ function parseConsistSequence(words: TsvWord[]): TrainConsistSequenceItem[] {
   }
 
   return output;
+}
+
+function buildTrainConsistVariants(input: {
+  relation: string;
+  consistRaw: string;
+  sequence: TrainConsistSequenceItem[];
+  notes: string[];
+}) {
+  const validity = input.notes.filter((line) => line.startsWith("Zestawienie ważne w terminach:"));
+  const sharedNotes = input.notes.filter((line) => !line.startsWith("Zestawienie ważne w terminach:"));
+
+  if (validity.length === 0) {
+    return [
+      {
+        relation: input.relation,
+        consistRaw: input.consistRaw,
+        sequence: input.sequence,
+        validity: [],
+        notes: sharedNotes,
+      },
+    ];
+  }
+
+  return validity.map((item) => ({
+    relation: input.relation,
+    consistRaw: input.consistRaw,
+    sequence: input.sequence,
+    validity: [item],
+    notes: sharedNotes,
+  }));
 }
 
 function splitMergedConsistToken(raw: string, width: number) {

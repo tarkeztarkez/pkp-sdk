@@ -99,6 +99,7 @@ export type TrainConsistsResponse = {
   validFrom: string;
   validTo: string;
   count: number;
+  variantCount: number;
   matches: TrainConsistEntry[];
 };
 

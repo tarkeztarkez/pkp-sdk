@@ -84,6 +84,7 @@ export async function getTrainConsists(input: { station: string; train: string }
     validFrom: parsed.validFrom || station.validFromHint,
     validTo: parsed.validTo,
     count: matches.length,
+    variantCount: matches.reduce((total, entry) => total + entry.variants.length, 0),
     matches,
   };
 }
