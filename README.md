@@ -1,39 +1,57 @@
-# pkp sdk
+# pkp-sdk monorepo
 
-SDK and CLI for `portalpasazera.pl`, built with Bun and TypeScript.
+Monorepo for querying `portalpasazera.pl`, split into focused packages:
 
-Examples:
+- `@pkp-sdk/core`: portable domain logic, scraping, parsing, normalization, and service functions
+- `@pkp-sdk/api`: Bun-only HTTP server on top of `core`
+- `@pkp-sdk/cli`: Bun-only CLI on top of `core`
+- `pkp-sdk`: portable npm-facing TypeScript SDK built on top of `core`
 
-```bash
-bun run index.ts stations "Warszawa"
-bun run index.ts stations "Warszawa" --json
-bun run index.ts route --from "Warszawa Centralna" --to "Kraków Główny"
-bun run index.ts route --from "Warszawa Centralna" --to "Kraków Główny" --grm --json
-bun run index.ts route --from "Warszawa Centralna" --to "Kraków Główny" --grm --carriage-svg 8 --json
-bun run index.ts routes --from "Warszawa Centralna" --to "Kraków Główny"
-bun run index.ts routes --from "Warszawa Centralna" --to "Kraków Główny" --json
-bun run index.ts departures "Warszawa Centralna"
-bun run index.ts arrivals "Warszawa Centralna"
-bun run index.ts delays --from "Warszawa Centralna" --to "Kraków Główny"
-bun run index.ts disruptions --station "Warszawa Centralna"
-bun run index.ts server serve --port 3000
-```
+## Workspace
 
-All commands support `--json` for machine-readable output. Without it, the CLI prints a human-readable summary.
-
-`route` behaves like `routes`, but returns only the first matching route. Add `--grm` to attach Bilkom GRM train/carriage data. Add `--carriage-svg <number>` to include the SVG layout for a specific carriage; this implies `--grm`.
-
-`routes` enriches Portal Pasażera route results with best-effort Bilkom ticket pricing. When Bilkom cannot match a route, price fields are returned as `null` in JSON and shown as `N/A` in text output.
-
-## REST API
-
-Start the local server:
+Install dependencies:
 
 ```bash
-pkp server serve --host 127.0.0.1 --port 3000
+bun install
 ```
 
-Available endpoints:
+Run workspace checks:
+
+```bash
+bun run typecheck
+bun run test
+bun run build
+```
+
+## CLI
+
+Run the Bun CLI package:
+
+```bash
+bun run --filter @pkp-sdk/cli start -- stations "Warszawa"
+bun run --filter @pkp-sdk/cli start -- stations "Warszawa" --json
+bun run --filter @pkp-sdk/cli start -- route --from "Warszawa Centralna" --to "Kraków Główny"
+bun run --filter @pkp-sdk/cli start -- route --from "Warszawa Centralna" --to "Kraków Główny" --grm --json
+bun run --filter @pkp-sdk/cli start -- route --from "Warszawa Centralna" --to "Kraków Główny" --grm --carriage-svg 8 --json
+bun run --filter @pkp-sdk/cli start -- routes --from "Warszawa Centralna" --to "Kraków Główny"
+bun run --filter @pkp-sdk/cli start -- departures "Warszawa Centralna"
+bun run --filter @pkp-sdk/cli start -- arrivals "Warszawa Centralna"
+bun run --filter @pkp-sdk/cli start -- delays --from "Warszawa Centralna" --to "Kraków Główny"
+bun run --filter @pkp-sdk/cli start -- disruptions --station "Warszawa Centralna"
+bun run --filter @pkp-sdk/cli start -- server serve --port 3000
+```
+
+All commands support `--json` for machine-readable output. `route` returns the first matching route. `--grm` attaches Bilkom GRM data. `--carriage-svg <number>` implies `--grm`.
+
+## API
+
+Run the Bun API package:
+
+```bash
+bun run --filter @pkp-sdk/api start --host 127.0.0.1 --port 3000
+```
+
+Endpoints:
 
 - `GET /stations?query=Warszawa`
 - `GET /train-numbers?query=IC`
@@ -48,7 +66,17 @@ Available endpoints:
 - `GET /disruptions?station=Warszawa%20Centralna`
 - `GET /openapi.json`
 
-The server enables permissive CORS and exposes an OpenAPI 3.1 document at `/openapi.json`.
+## TypeScript SDK
+
+`pkp-sdk` is the npm-facing package. It exposes both direct functions and a thin `PkpSdk` wrapper:
+
+```ts
+import { PkpSdk, searchStations } from "pkp-sdk";
+
+const sdk = new PkpSdk();
+const stations = await sdk.searchStations("Warszawa");
+const sameResult = await searchStations("Warszawa");
+```
 
 ## Docker
 
@@ -58,17 +86,10 @@ Build the image:
 docker build -t pkp-sdk .
 ```
 
-Run the REST server:
+Run the API server:
 
 ```bash
 docker run --rm -p 3000:3000 pkp-sdk
 ```
 
-Then use:
-
-- `http://127.0.0.1:3000/`
-- `http://127.0.0.1:3000/openapi.json`
-
-The container starts `pkp server serve --host 0.0.0.0 --port 3000` by default.
-
-This project was created using `bun init` in bun v1.3.9. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+The container starts `@pkp-sdk/api` on `0.0.0.0:3000`.

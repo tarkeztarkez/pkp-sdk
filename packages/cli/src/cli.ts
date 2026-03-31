@@ -11,9 +11,9 @@ import {
   searchStations,
   searchTrainNumbers,
   todayLocalDate,
-} from "./api";
-import { cleanText } from "./parsers";
-import { startServer } from "./server";
+} from "../../core/src";
+import { cleanText } from "../../core/src";
+import { startServer } from "../../api/src/server";
 
 type FlagValue = string | boolean;
 

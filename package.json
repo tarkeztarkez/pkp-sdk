@@ -1,24 +1,20 @@
 {
-  "name": "pkp-sdk",
-  "module": "index.ts",
-  "bin": {
-    "pkp": "./index.ts"
-  },
-  "type": "module",
+  "name": "pkp-sdk-monorepo",
   "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.9",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "start": "bun run ./index.ts",
-    "routes": "bun run ./index.ts routes",
-    "stations": "bun run ./index.ts stations",
-    "serve": "bun run ./index.ts server serve"
+    "build": "bun run --workspaces --sequential build",
+    "typecheck": "bun run --workspaces --sequential typecheck",
+    "test": "bun run --workspaces --sequential test",
+    "cli": "bun run --filter '@pkp-sdk/cli' start",
+    "api": "bun run --filter '@pkp-sdk/api' start"
   },
   "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
-  "dependencies": {
-    "cheerio": "^1.2.0"
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
   }
 }

@@ -6,7 +6,7 @@ import {
   searchRoutes,
   searchStations,
   searchTrainNumbers,
-} from "./api";
+} from "../../core/src";
 
 type ServerOptions = {
   host?: string;
