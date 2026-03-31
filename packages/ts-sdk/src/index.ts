@@ -1,63 +1,56 @@
 import {
-  getStationBoard,
-  searchDelays,
-  searchDisruptions,
-  searchRoute,
-  searchRoutes,
-  searchStations,
-  searchTrainNumbers,
-  type DelaysResponse,
-  type DisruptionsResponse,
-  type RouteResponse,
-  type RoutesResponse,
-  type StationBoardResponse,
-  type StationsResponse,
-  type TrainNumbersResponse,
-} from "../../core/src";
-
-export type {
+  getStationBoard as getStationBoardCore,
+  searchDelays as searchDelaysCore,
+  searchDisruptions as searchDisruptionsCore,
+  searchRoute as searchRouteCore,
+  searchRoutes as searchRoutesCore,
+  searchStations as searchStationsCore,
+  searchTrainNumbers as searchTrainNumbersCore,
+} from "../../core/src/services";
+import type {
   DelaysResponse,
   DisruptionsResponse,
   RouteResponse,
   RoutesResponse,
+  SearchDelaysInput,
+  SearchDisruptionsInput,
+  SearchRouteInput,
+  SearchRoutesInput,
+  StationBoardInput,
   StationBoardResponse,
   StationsResponse,
   TrainNumbersResponse,
-} from "../../core/src";
+} from "./types";
 
-export type SearchRoutesInput = Parameters<typeof searchRoutes>[0];
-export type SearchRouteInput = Parameters<typeof searchRoute>[0];
-export type StationBoardInput = Parameters<typeof getStationBoard>[0];
-export type SearchDelaysInput = Parameters<typeof searchDelays>[0];
-export type SearchDisruptionsInput = Parameters<typeof searchDisruptions>[0];
+export type * from "./types";
 
 export class PkpSdk {
   searchStations(query: string): Promise<StationsResponse> {
-    return searchStations(query);
+    return searchStationsCore(query) as Promise<StationsResponse>;
   }
 
   searchTrainNumbers(query: string): Promise<TrainNumbersResponse> {
-    return searchTrainNumbers(query);
+    return searchTrainNumbersCore(query) as Promise<TrainNumbersResponse>;
   }
 
   searchRoutes(input: SearchRoutesInput): Promise<RoutesResponse> {
-    return searchRoutes(input);
+    return searchRoutesCore(input) as Promise<RoutesResponse>;
   }
 
   searchRoute(input: SearchRouteInput): Promise<RouteResponse> {
-    return searchRoute(input);
+    return searchRouteCore(input) as Promise<RouteResponse>;
   }
 
   getStationBoard(input: StationBoardInput): Promise<StationBoardResponse> {
-    return getStationBoard(input);
+    return getStationBoardCore(input) as Promise<StationBoardResponse>;
   }
 
   searchDelays(input: SearchDelaysInput): Promise<DelaysResponse> {
-    return searchDelays(input);
+    return searchDelaysCore(input) as Promise<DelaysResponse>;
   }
 
   searchDisruptions(input: SearchDisruptionsInput): Promise<DisruptionsResponse> {
-    return searchDisruptions(input);
+    return searchDisruptionsCore(input) as Promise<DisruptionsResponse>;
   }
 }
 
@@ -65,12 +58,30 @@ export function createPkpSdk() {
   return new PkpSdk();
 }
 
-export {
-  getStationBoard,
-  searchDelays,
-  searchDisruptions,
-  searchRoute,
-  searchRoutes,
-  searchStations,
-  searchTrainNumbers,
-};
+export function searchStations(query: string): Promise<StationsResponse> {
+  return searchStationsCore(query) as Promise<StationsResponse>;
+}
+
+export function searchTrainNumbers(query: string): Promise<TrainNumbersResponse> {
+  return searchTrainNumbersCore(query) as Promise<TrainNumbersResponse>;
+}
+
+export function searchRoutes(input: SearchRoutesInput): Promise<RoutesResponse> {
+  return searchRoutesCore(input) as Promise<RoutesResponse>;
+}
+
+export function searchRoute(input: SearchRouteInput): Promise<RouteResponse> {
+  return searchRouteCore(input) as Promise<RouteResponse>;
+}
+
+export function getStationBoard(input: StationBoardInput): Promise<StationBoardResponse> {
+  return getStationBoardCore(input) as Promise<StationBoardResponse>;
+}
+
+export function searchDelays(input: SearchDelaysInput): Promise<DelaysResponse> {
+  return searchDelaysCore(input) as Promise<DelaysResponse>;
+}
+
+export function searchDisruptions(input: SearchDisruptionsInput): Promise<DisruptionsResponse> {
+  return searchDisruptionsCore(input) as Promise<DisruptionsResponse>;
+}

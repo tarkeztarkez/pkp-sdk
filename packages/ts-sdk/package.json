@@ -7,18 +7,15 @@
   ],
   "exports": {
     ".": {
-      "types": "./dist/ts-sdk/src/index.d.ts",
+      "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
   },
   "main": "./dist/index.js",
-  "types": "./dist/ts-sdk/src/index.d.ts",
+  "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target node && tsc -p ./tsconfig.build.json",
+    "build": "bun build ./src/index.ts --outdir ./dist --target node && cp ./src/index.d.ts ./dist/index.d.ts && cp ./src/types.ts ./dist/types.d.ts",
     "typecheck": "tsc -p ./tsconfig.json",
     "test": "bun test ./src"
-  },
-  "dependencies": {
-    "@pkp-sdk/core": "workspace:*"
   }
 }
