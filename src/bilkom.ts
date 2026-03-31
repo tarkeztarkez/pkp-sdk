@@ -39,6 +39,75 @@ type BilkomJourneyPriceRequest = {
   }>;
 };
 
+export type BilkomGrmJourney = {
+  stationFrom: string;
+  stationTo: string;
+  stationNumberingSystem: "HAFAS";
+  vehicleNumber: string;
+  departureDate: string;
+  arrivalDate: string;
+  category: string;
+};
+
+export type BilkomGrmTrainComposition = {
+  pojazdTyp: string;
+  pojazdNazwa: string;
+  wagony: number[];
+  wagonyUdogodnienia: Record<string, string[]>;
+  klasa0: number[];
+  klasa1: number[];
+  klasa2: number[];
+  kierunekJazdy: number;
+  zmieniaKierunek: boolean;
+  wagonySchemat: Record<string, string>;
+  klasaDomyslnyWagon: Record<string, number>;
+  wagonyNiedostepne: number[];
+};
+
+export type BilkomGrmCarriageSpot = {
+  number: number;
+  status: string;
+  properties: string[];
+  serviceType: string;
+};
+
+export type BilkomGrmCarriageSpotStat = {
+  serviceType: string;
+  trainClass: string;
+  type: string;
+  noOfAllSpots: number;
+  noOfAvailableSpots: number;
+  noOfReservedSpots: number;
+  noOfBlockedSpots: number;
+  occupancyPercent: number;
+};
+
+export type BilkomGrmCarriage = {
+  serviceType: string;
+  additionalServices: string[];
+  carriageNumber: number;
+  epaType: string;
+  compartmentType: string;
+  schema: string;
+  order: number;
+  baseOrder: number;
+  spotNumberOrder: string;
+  status: string;
+  travelPlan: {
+    fromStationNumber: number;
+    toStationNumber: number;
+  } | null;
+  spotsStats: BilkomGrmCarriageSpotStat[];
+  spots: BilkomGrmCarriageSpot[];
+};
+
+export type BilkomGrmCarriagesResponse = {
+  hadesResponseInfo: Record<string, unknown> | null;
+  vehicle: Record<string, unknown> | null;
+  stops: Array<Record<string, unknown>>;
+  carriages: BilkomGrmCarriage[];
+};
+
 type BilkomPriceResponse = {
   journeyPrices?: Array<{
     id?: string;
@@ -64,6 +133,8 @@ type BilkomJourneyCandidate = {
   routeKey: string;
   request: BilkomJourneyPriceRequest;
 };
+
+let grmAuthHeaderPromise: Promise<string> | null = null;
 
 export async function fetchBilkomRoutePrices(input: {
   from: string;
@@ -111,6 +182,112 @@ export async function fetchBilkomRoutePrices(input: {
       ticketPriceAvailable: price !== null,
     };
   });
+}
+
+export async function findBilkomGrmJourney(input: {
+  from: string;
+  to: string;
+  date: string;
+  time: string;
+  departureMode: boolean;
+  minChangeMinutes: number;
+  direct: boolean;
+  routeKey: string;
+  routeTimeKey: string;
+}): Promise<BilkomGrmJourney | null> {
+  const [fromStation, toStation] = await Promise.all([
+    searchBilkomStation(input.from, "FROMSTATION"),
+    searchBilkomStation(input.to, "TOSTATION"),
+  ]);
+
+  const html = await fetchBilkomSearchPage({
+    from: fromStation,
+    to: toStation,
+    date: input.date,
+    time: input.time,
+    departureMode: input.departureMode,
+    minChangeMinutes: input.minChangeMinutes,
+    direct: input.direct,
+  });
+
+  const journeys = parseBilkomJourneys(html);
+  const exactMatch = journeys.find((item) => item.routeKey === input.routeKey);
+  const timeMatches = journeys.filter((item) => buildBilkomTimeKey(item.routeKey) === input.routeTimeKey);
+  const match = exactMatch ?? (timeMatches.length === 1 ? timeMatches[0] : null);
+  if (!match) {
+    return null;
+  }
+
+  const offeredTrain = match.request.offeredTrains[0];
+  if (!offeredTrain || match.request.offeredTrains.length !== 1) {
+    return null;
+  }
+
+  return {
+    stationFrom: offeredTrain.departureStationCode.hafasId,
+    stationTo: offeredTrain.arrivalStationCode.hafasId,
+    stationNumberingSystem: "HAFAS",
+    vehicleNumber: offeredTrain.trainNumber,
+    departureDate: normalizeBilkomIsoDateTime(offeredTrain.departureDate),
+    arrivalDate: normalizeBilkomIsoDateTime(offeredTrain.arrivalDate),
+    category: cleanToken(offeredTrain.carrier.shortName).toUpperCase(),
+  };
+}
+
+export async function fetchBilkomGrmTrainComposition(input: BilkomGrmJourney): Promise<BilkomGrmTrainComposition> {
+  const payload = await fetchBilkomGrmJson<Partial<BilkomGrmTrainComposition>>("/grm/sklad", buildBilkomGrmTrainRequest(input));
+
+  return {
+    pojazdTyp: cleanToken(payload.pojazdTyp),
+    pojazdNazwa: cleanToken(payload.pojazdNazwa),
+    wagony: normalizeNumberArray(payload.wagony),
+    wagonyUdogodnienia: normalizeStringArrayRecord(payload.wagonyUdogodnienia),
+    klasa0: normalizeNumberArray(payload.klasa0),
+    klasa1: normalizeNumberArray(payload.klasa1),
+    klasa2: normalizeNumberArray(payload.klasa2),
+    kierunekJazdy: typeof payload.kierunekJazdy === "number" ? payload.kierunekJazdy : 0,
+    zmieniaKierunek: Boolean(payload.zmieniaKierunek),
+    wagonySchemat: normalizeStringRecord(payload.wagonySchemat),
+    klasaDomyslnyWagon: normalizeNumberRecord(payload.klasaDomyslnyWagon),
+    wagonyNiedostepne: normalizeNumberArray(payload.wagonyNiedostepne),
+  };
+}
+
+export async function fetchBilkomGrmCarriages(input: BilkomGrmJourney): Promise<BilkomGrmCarriagesResponse> {
+  const payload = await fetchBilkomGrmJson<Partial<BilkomGrmCarriagesResponse>>("/grm", {
+    ...buildBilkomGrmTrainRequest(input),
+    type: "CARRIAGE",
+    returnAllSectionsAvailableAtStationFrom: true,
+    returnBGMRecordsInfo: false,
+  });
+
+  return {
+    hadesResponseInfo: isRecord(payload.hadesResponseInfo) ? payload.hadesResponseInfo : null,
+    vehicle: isRecord(payload.vehicle) ? payload.vehicle : null,
+    stops: Array.isArray(payload.stops) ? payload.stops.filter(isRecord) : [],
+    carriages: normalizeBilkomGrmCarriages(payload.carriages),
+  };
+}
+
+export async function fetchBilkomGrmCarriageSvg(input: BilkomGrmJourney, carriageNumber: number): Promise<string> {
+  const response = await fetch(`${BILKOM_BASE_URL}/grm/wagon/schemat/svg/availableIC`, {
+    method: "POST",
+    headers: {
+      authorization: await getBilkomGrmAuthHeader(),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      ...buildBilkomGrmTrainRequest(input),
+      carriageNumber,
+      category: input.category,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Bilkom GRM carriage SVG lookup failed with status ${response.status}.`);
+  }
+
+  return await response.text();
 }
 
 export function buildBilkomRouteKey(input: {
@@ -177,6 +354,22 @@ export function parseBilkomJourneys(html: string): BilkomJourneyCandidate[] {
       };
     })
     .filter((item): item is BilkomJourneyCandidate => item !== null);
+}
+
+export function buildBilkomGrmRouteKey(input: {
+  departureDate: string;
+  departureTime: string;
+  arrivalDate: string;
+  arrivalTime: string;
+  transfers: number;
+  category: string;
+  trainNumber: string;
+}) {
+  return buildBilkomRouteKey(input);
+}
+
+function buildBilkomTimeKey(routeKey: string) {
+  return routeKey.split("|").slice(0, 5).join("|");
 }
 
 function buildBilkomJourneyPriceRequest(
@@ -267,6 +460,23 @@ async function fetchBilkomJourneyPrices(requests: BilkomJourneyPriceRequest[]): 
   return (await response.json()) as BilkomPriceResponse;
 }
 
+async function fetchBilkomGrmJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${BILKOM_BASE_URL}${path}`, {
+    method: "POST",
+    headers: {
+      authorization: await getBilkomGrmAuthHeader(),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Bilkom GRM lookup failed with status ${response.status} for ${path}.`);
+  }
+
+  return (await response.json()) as T;
+}
+
 async function fetchBilkomSearchPage(input: {
   from: BilkomStation;
   to: BilkomStation;
@@ -346,6 +556,105 @@ function normalizeBilkomPrice(item: NonNullable<BilkomPriceResponse["journeyPric
   return Number((cents / 100).toFixed(2));
 }
 
+async function getBilkomGrmAuthHeader() {
+  if (!grmAuthHeaderPromise) {
+    grmAuthHeaderPromise = resolveBilkomGrmAuthHeader();
+  }
+
+  return await grmAuthHeaderPromise;
+}
+
+async function resolveBilkomGrmAuthHeader() {
+  const configured = process.env.BILKOM_GRM_BASIC_AUTH?.trim();
+  if (configured) {
+    return configured.startsWith("Basic ") ? configured : `Basic ${configured}`;
+  }
+
+  const indexUrl = `${BILKOM_BASE_URL}/ngx-grm/index.html?v=%204.3`;
+  const html = await (await fetch(indexUrl)).text();
+  const scriptPath = html.match(/src="([^"]*main\.[^"]+\.js)"/)?.[1];
+  if (!scriptPath) {
+    throw new Error("Could not discover Bilkom GRM bundle URL.");
+  }
+
+  const scriptUrl = new URL(scriptPath, indexUrl).toString();
+  const bundle = await (await fetch(scriptUrl)).text();
+  const creds = bundle.match(/from\("([^"]+)"\s*,\s*"utf8"\)\.toString\("base64"\)/)?.[1];
+  if (!creds) {
+    throw new Error("Could not discover Bilkom GRM authorization header.");
+  }
+
+  return `Basic ${Buffer.from(creds, "utf8").toString("base64")}`;
+}
+
+function buildBilkomGrmTrainRequest(input: BilkomGrmJourney) {
+  return {
+    stationFrom: input.stationFrom,
+    stationTo: input.stationTo,
+    stationNumberingSystem: input.stationNumberingSystem,
+    vehicleNumber: input.vehicleNumber,
+    departureDate: input.departureDate,
+    arrivalDate: input.arrivalDate,
+  };
+}
+
+function normalizeBilkomGrmCarriages(value: unknown): BilkomGrmCarriage[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecord).map((item) => ({
+    serviceType: cleanToken(asString(item.serviceType)),
+    additionalServices: normalizeStringArray(item.additionalServices),
+    carriageNumber: asNumber(item.carriageNumber),
+    epaType: cleanToken(asString(item.epaType)),
+    compartmentType: cleanToken(asString(item.compartmentType)),
+    schema: cleanToken(asString(item.schema)),
+    order: asNumber(item.order),
+    baseOrder: asNumber(item.baseOrder),
+    spotNumberOrder: cleanToken(asString(item.spotNumberOrder)),
+    status: cleanToken(asString(item.status)),
+    travelPlan: isRecord(item.travelPlan)
+      ? {
+          fromStationNumber: asNumber(item.travelPlan.fromStationNumber),
+          toStationNumber: asNumber(item.travelPlan.toStationNumber),
+        }
+      : null,
+    spotsStats: normalizeBilkomGrmSpotStats(item.spotsStats),
+    spots: normalizeBilkomGrmSpots(item.spots),
+  }));
+}
+
+function normalizeBilkomGrmSpots(value: unknown): BilkomGrmCarriageSpot[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecord).map((item) => ({
+    number: asNumber(item.number),
+    status: cleanToken(asString(item.status)),
+    properties: normalizeStringArray(item.properties),
+    serviceType: cleanToken(asString(item.serviceType)),
+  }));
+}
+
+function normalizeBilkomGrmSpotStats(value: unknown): BilkomGrmCarriageSpotStat[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecord).map((item) => ({
+    serviceType: cleanToken(asString(item.serviceType)),
+    trainClass: cleanToken(asString(item.trainClass)),
+    type: cleanToken(asString(item.type)),
+    noOfAllSpots: asNumber(item.noOfAllSpots),
+    noOfAvailableSpots: asNumber(item.noOfAvailableSpots),
+    noOfReservedSpots: asNumber(item.noOfReservedSpots),
+    noOfBlockedSpots: asNumber(item.noOfBlockedSpots),
+    occupancyPercent: asNumber(item.occupancyPercent),
+  }));
+}
+
 function bilkomTripDate(date: string, time: string) {
   const [day, month, year] = date.split(".");
   return `${day}${month}${year}${time.replace(":", "")}`;
@@ -367,6 +676,15 @@ function bilkomMinChangeValue(minChangeMinutes: number) {
     return "10";
   }
   return "";
+}
+
+function normalizeBilkomIsoDateTime(value: string) {
+  const match = value.match(/(\d{2})-(\d{2})-(\d{4}) (\d{2}:\d{2})/);
+  if (!match) {
+    throw new Error(`Invalid Bilkom date-time: ${value}`);
+  }
+
+  return `${match[3]}-${match[2]}-${match[1]}T${match[4]}:00`;
 }
 
 function extractTimeToken(value: string) {
@@ -405,4 +723,48 @@ function normalizeRouteToken(value: string) {
 
 function cleanToken(value: string | undefined) {
   return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeNumberArray(value: unknown) {
+  return Array.isArray(value) ? value.map(asNumber).filter((item) => item > 0) : [];
+}
+
+function normalizeStringArray(value: unknown) {
+  return Array.isArray(value) ? value.map(asString).map(cleanToken).filter(Boolean) : [];
+}
+
+function normalizeStringArrayRecord(value: unknown) {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, normalizeStringArray(item)]));
+}
+
+function normalizeStringRecord(value: unknown) {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cleanToken(asString(item))]));
+}
+
+function normalizeNumberRecord(value: unknown) {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, asNumber(item)]));
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function asNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

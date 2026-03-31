@@ -1,5 +1,14 @@
 import { PortalSession, type Station } from "./client";
-import { buildBilkomRouteKey, fetchBilkomRoutePrices } from "./bilkom";
+import {
+  buildBilkomRouteKey,
+  fetchBilkomGrmCarriages,
+  fetchBilkomGrmCarriageSvg,
+  fetchBilkomGrmTrainComposition,
+  fetchBilkomRoutePrices,
+  findBilkomGrmJourney,
+  type BilkomGrmCarriagesResponse,
+  type BilkomGrmTrainComposition,
+} from "./bilkom";
 import {
   parseDelayResults,
   parseDisruptions,
@@ -49,6 +58,22 @@ export type RoutesResponse = {
       ticketPriceAvailable: boolean;
     }
   >;
+};
+
+export type RouteWithPrice = RoutesResponse["routes"][number];
+
+export type RouteResponse = {
+  ref: string;
+  query: RoutesResponse["query"];
+  count: number;
+  route: RouteWithPrice;
+  grm?: {
+    trainComposition: BilkomGrmTrainComposition;
+    carriages: BilkomGrmCarriagesResponse["carriages"];
+    vehicle: BilkomGrmCarriagesResponse["vehicle"];
+    stops: BilkomGrmCarriagesResponse["stops"];
+  };
+  carriageSvg?: string;
 };
 
 export type StationBoardResponse = {
@@ -211,6 +236,94 @@ export async function searchRoutes(input: {
       };
     }),
   };
+}
+
+export async function searchRoute(input: {
+  from: string;
+  to: string;
+  date?: string;
+  time?: string;
+  arrival?: boolean;
+  minChange?: number;
+  direct?: boolean;
+  grm?: boolean;
+  carriageSvg?: number;
+}): Promise<RouteResponse> {
+  const response = await searchRoutes(input);
+  const route = response.routes[0];
+  if (!route) {
+    throw new Error("No matching route found.");
+  }
+
+  const carriageNumber = normalizeOptionalPositiveInt(input.carriageSvg);
+  const needsGrm = Boolean(input.grm) || carriageNumber !== undefined;
+
+  const output: RouteResponse = {
+    ref: response.ref,
+    query: response.query,
+    count: response.count,
+    route,
+  };
+
+  if (!needsGrm) {
+    return output;
+  }
+
+  if (route.transfers !== 0 || !route.category || !route.trainNumber) {
+    throw new Error("GRM is only available for direct routes with a single train number.");
+  }
+
+  const journey = await findBilkomGrmJourney({
+    from: response.query.from,
+    to: response.query.to,
+    date: response.query.date,
+    time: response.query.time,
+    departureMode: response.query.departureMode,
+    minChangeMinutes: response.query.minChangeMinutes,
+    direct: response.query.direct,
+    routeKey: buildBilkomRouteKey({
+      departureDate: route.departureDate,
+      departureTime: route.departureTime,
+      arrivalDate: route.arrivalDate,
+      arrivalTime: route.arrivalTime,
+      transfers: route.transfers,
+      category: route.category,
+      trainNumber: route.trainNumber,
+    }),
+    routeTimeKey: [
+      route.departureDate,
+      route.departureTime,
+      route.arrivalDate,
+      route.arrivalTime,
+      String(route.transfers),
+    ].join("|"),
+  });
+
+  if (!journey) {
+    throw new Error("Could not match the selected route to Bilkom GRM data.");
+  }
+
+  const [trainComposition, carriagesResponse] = await Promise.all([
+    fetchBilkomGrmTrainComposition(journey),
+    fetchBilkomGrmCarriages(journey),
+  ]);
+
+  output.grm = {
+    trainComposition,
+    carriages: carriagesResponse.carriages,
+    vehicle: carriagesResponse.vehicle,
+    stops: carriagesResponse.stops,
+  };
+
+  if (carriageNumber !== undefined) {
+    if (!carriagesResponse.carriages.some((item) => item.carriageNumber === carriageNumber)) {
+      throw new Error(`Carriage ${carriageNumber} is not available for the selected route.`);
+    }
+
+    output.carriageSvg = await fetchBilkomGrmCarriageSvg(journey, carriageNumber);
+  }
+
+  return output;
 }
 
 function findUniqueBilkomTimeMatch(
@@ -403,6 +516,22 @@ function normalizePositiveInt(value: number | string | undefined, fallback: numb
   }
 
   return fallback;
+}
+
+function normalizeOptionalPositiveInt(value: number | string | undefined) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 1) {
+    return Math.floor(value);
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed) && parsed >= 1) {
+      return parsed;
+    }
+    throw new Error(`Invalid carriage number: ${value}.`);
+  }
+
+  return undefined;
 }
 
 function pad(value: number) {

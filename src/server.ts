@@ -1,5 +1,6 @@
 import {
   getStationBoard,
+  searchRoute,
   searchDelays,
   searchDisruptions,
   searchRoutes,
@@ -34,6 +35,7 @@ export function startServer(options: ServerOptions = {}) {
             endpoints: [
               "/stations",
               "/train-numbers",
+              "/route",
               "/routes",
               "/departures",
               "/arrivals",
@@ -66,6 +68,22 @@ export function startServer(options: ServerOptions = {}) {
               arrival: booleanParam(url, "arrival"),
               minChange: numberParam(url, "minChange"),
               direct: booleanParam(url, "direct"),
+            }),
+          );
+        }
+
+        if (request.method === "GET" && url.pathname === "/route") {
+          return jsonResponse(
+            await searchRoute({
+              from: requiredParam(url, "from"),
+              to: requiredParam(url, "to"),
+              date: optionalParam(url, "date"),
+              time: optionalParam(url, "time"),
+              arrival: booleanParam(url, "arrival"),
+              minChange: numberParam(url, "minChange"),
+              direct: booleanParam(url, "direct"),
+              grm: booleanParam(url, "grm"),
+              carriageSvg: numberParam(url, "carriageSvg"),
             }),
           );
         }
@@ -113,7 +131,11 @@ export function startServer(options: ServerOptions = {}) {
         return jsonResponse({ error: `Not found: ${url.pathname}` }, 404);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const status = message.startsWith("Missing required") || message.startsWith("Invalid ") ? 400 : 500;
+        const status = message.startsWith("Missing required") || message.startsWith("Invalid ")
+          ? 400
+          : message.startsWith("No matching route found.")
+            ? 404
+            : 500;
         return jsonResponse({ error: message }, status);
       }
     },
@@ -260,6 +282,153 @@ function buildOpenApiDocument(host: string, port: number) {
             },
           },
           required: ["ref", "query", "count", "routes"],
+          additionalProperties: false,
+        },
+        GrmCarriageSpot: {
+          type: "object",
+          properties: {
+            number: { type: "integer" },
+            status: { type: "string" },
+            properties: {
+              type: "array",
+              items: { type: "string" },
+            },
+            serviceType: { type: "string" },
+          },
+          required: ["number", "status", "properties", "serviceType"],
+          additionalProperties: false,
+        },
+        GrmCarriageSpotStat: {
+          type: "object",
+          properties: {
+            serviceType: { type: "string" },
+            trainClass: { type: "string" },
+            type: { type: "string" },
+            noOfAllSpots: { type: "integer" },
+            noOfAvailableSpots: { type: "integer" },
+            noOfReservedSpots: { type: "integer" },
+            noOfBlockedSpots: { type: "integer" },
+            occupancyPercent: { type: "number" },
+          },
+          required: [
+            "serviceType",
+            "trainClass",
+            "type",
+            "noOfAllSpots",
+            "noOfAvailableSpots",
+            "noOfReservedSpots",
+            "noOfBlockedSpots",
+            "occupancyPercent",
+          ],
+          additionalProperties: false,
+        },
+        GrmTrainComposition: {
+          type: "object",
+          properties: {
+            pojazdTyp: { type: "string" },
+            pojazdNazwa: { type: "string" },
+            wagony: { type: "array", items: { type: "integer" } },
+            wagonyUdogodnienia: { type: "object", additionalProperties: { type: "array", items: { type: "string" } } },
+            klasa0: { type: "array", items: { type: "integer" } },
+            klasa1: { type: "array", items: { type: "integer" } },
+            klasa2: { type: "array", items: { type: "integer" } },
+            kierunekJazdy: { type: "integer" },
+            zmieniaKierunek: { type: "boolean" },
+            wagonySchemat: { type: "object", additionalProperties: { type: "string" } },
+            klasaDomyslnyWagon: { type: "object", additionalProperties: { type: "integer" } },
+            wagonyNiedostepne: { type: "array", items: { type: "integer" } },
+          },
+          required: [
+            "pojazdTyp",
+            "pojazdNazwa",
+            "wagony",
+            "wagonyUdogodnienia",
+            "klasa0",
+            "klasa1",
+            "klasa2",
+            "kierunekJazdy",
+            "zmieniaKierunek",
+            "wagonySchemat",
+            "klasaDomyslnyWagon",
+            "wagonyNiedostepne",
+          ],
+          additionalProperties: false,
+        },
+        GrmCarriage: {
+          type: "object",
+          properties: {
+            serviceType: { type: "string" },
+            additionalServices: { type: "array", items: { type: "string" } },
+            carriageNumber: { type: "integer" },
+            epaType: { type: "string" },
+            compartmentType: { type: "string" },
+            schema: { type: "string" },
+            order: { type: "integer" },
+            baseOrder: { type: "integer" },
+            spotNumberOrder: { type: "string" },
+            status: { type: "string" },
+            travelPlan: {
+              oneOf: [
+                {
+                  type: "object",
+                  properties: {
+                    fromStationNumber: { type: "integer" },
+                    toStationNumber: { type: "integer" },
+                  },
+                  required: ["fromStationNumber", "toStationNumber"],
+                  additionalProperties: false,
+                },
+                { type: "null" },
+              ],
+            },
+            spotsStats: { type: "array", items: schemaRef("GrmCarriageSpotStat") },
+            spots: { type: "array", items: schemaRef("GrmCarriageSpot") },
+          },
+          required: [
+            "serviceType",
+            "additionalServices",
+            "carriageNumber",
+            "epaType",
+            "compartmentType",
+            "schema",
+            "order",
+            "baseOrder",
+            "spotNumberOrder",
+            "status",
+            "travelPlan",
+            "spotsStats",
+            "spots",
+          ],
+          additionalProperties: false,
+        },
+        RouteGrm: {
+          type: "object",
+          properties: {
+            trainComposition: schemaRef("GrmTrainComposition"),
+            carriages: { type: "array", items: schemaRef("GrmCarriage") },
+            vehicle: {
+              oneOf: [{ type: "object", additionalProperties: true }, { type: "null" }],
+            },
+            stops: { type: "array", items: { type: "object", additionalProperties: true } },
+          },
+          required: ["trainComposition", "carriages", "vehicle", "stops"],
+          additionalProperties: false,
+        },
+        RouteResponse: {
+          type: "object",
+          properties: {
+            ref: { type: "string" },
+            query: schemaRef("RoutesQuery"),
+            count: { type: "integer" },
+            route: schemaRef("Route"),
+            grm: {
+              oneOf: [schemaRef("RouteGrm"), { type: "null" }],
+            },
+            carriageSvg: {
+              oneOf: [{ type: "string" }, { type: "null" }],
+            },
+          },
+          required: ["ref", "query", "count", "route"],
           additionalProperties: false,
         },
         StationBoardEntry: {
@@ -437,6 +606,27 @@ function buildOpenApiDocument(host: string, port: number) {
             queryParam("direct", "If true, return direct connections only", false, "boolean"),
           ],
           responses: successResponse("Route search results", "RoutesResponse"),
+        },
+      },
+      "/route": {
+        get: {
+          operationId: "searchRoute",
+          summary: "Search the first matching route between stations",
+          parameters: [
+            queryParam("from", "Origin station name", true),
+            queryParam("to", "Destination station name", true),
+            queryParam("date", "Date in DD.MM.YYYY"),
+            queryParam("time", "Time in HH:MM"),
+            queryParam("arrival", "If true, search by arrival time instead of departure time", false, "boolean"),
+            queryParam("minChange", "Minimum transfer time in minutes", false, "integer"),
+            queryParam("direct", "If true, return direct connections only", false, "boolean"),
+            queryParam("grm", "If true, enrich the selected route with Bilkom GRM data", false, "boolean"),
+            queryParam("carriageSvg", "Carriage number to fetch as an SVG string", false, "integer"),
+          ],
+          responses: {
+            ...successResponse("First matching route", "RouteResponse"),
+            404: errorResponse("No matching route found"),
+          },
         },
       },
       "/departures": {

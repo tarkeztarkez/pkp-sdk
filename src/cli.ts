@@ -4,6 +4,7 @@ import {
   normalizeTime,
   nowLocalTimeRounded,
   requireValue,
+  searchRoute,
   searchDelays,
   searchDisruptions,
   searchRoutes,
@@ -36,6 +37,9 @@ export async function runCli(argv: string[]) {
         break;
       case "routes":
         await handleRoutes(flags);
+        break;
+      case "route":
+        await handleRoute(flags);
         break;
       case "departures":
         await handleBoard(positionals, flags, true);
@@ -157,6 +161,73 @@ async function handleRoutes(flags: Map<string, FlagValue>) {
   }
 }
 
+async function handleRoute(flags: Map<string, FlagValue>) {
+  const from = requireValue(flagString(flags, "from"), "--from");
+  const to = requireValue(flagString(flags, "to"), "--to");
+  const response = await searchRoute({
+    from,
+    to,
+    date: normalizeDate(flagString(flags, "date") || todayLocalDate()),
+    time: normalizeTime(flagString(flags, "time") || nowLocalTimeRounded()),
+    minChange: Number.parseInt(flagString(flags, "min-change") || "3", 10),
+    arrival: flagBool(flags, "arrival"),
+    direct: flagBool(flags, "direct"),
+    grm: flagBool(flags, "grm"),
+    carriageSvg: parseOptionalIntFlag(flags, "carriage-svg"),
+  });
+
+  if (flagBool(flags, "json")) {
+    printJson(response);
+    return;
+  }
+
+  printSection(`Route from ${from} to ${to}`, response.count, [
+    `Date: ${response.query.date}`,
+    `${response.query.departureMode ? "Depart after" : "Arrive by"}: ${response.query.time}`,
+    `Min change: ${response.query.minChangeMinutes} min`,
+    `Direct only: ${response.query.direct ? "yes" : "no"}`,
+    `Ref: ${response.ref}`,
+  ]);
+
+  printEntry(
+    [
+      `${response.route.departureDate} ${response.route.departureTime} -> ${response.route.arrivalDate} ${response.route.arrivalTime}`,
+      `${response.route.departureStation} -> ${response.route.arrivalStation}`,
+      `Train: ${joinNonEmpty([response.route.category, response.route.trainNumber])}`,
+      `Carrier: ${response.route.carrier}`,
+      `Duration: ${response.route.duration}`,
+      `Transfers: ${response.route.transfers}`,
+      `Price: ${formatTicketPrice(response.route.ticketPrice, response.route.ticketPriceCurrency)}`,
+      `Platforms: ${fallbackText(response.route.departurePlatform)} -> ${fallbackText(response.route.arrivalPlatform)}`,
+      response.route.relation ? `Relation: ${response.route.relation}` : "",
+      response.route.detailsUrl ? `Details: ${response.route.detailsUrl}` : "",
+    ],
+    true,
+  );
+
+  if (response.grm) {
+    printSection("GRM", response.grm.carriages.length, [
+      `Vehicle: ${fallbackText(cleanText(`${String(response.grm.vehicle?.type ?? "")} ${String(response.grm.vehicle?.name ?? "")}`))}`,
+      `Carriages: ${response.grm.trainComposition.wagony.join(", ") || "N/A"}`,
+      `Unavailable: ${response.grm.trainComposition.wagonyNiedostepne.join(", ") || "none"}`,
+    ]);
+
+    for (const carriage of response.grm.carriages) {
+      printEntry([
+        `Carriage ${carriage.carriageNumber}`,
+        carriage.schema ? `Schema: ${carriage.schema}` : "",
+        carriage.status ? `Status: ${carriage.status}` : "",
+        `Spots: ${carriage.spots.length}`,
+        carriage.additionalServices.length > 0 ? `Services: ${carriage.additionalServices.join(", ")}` : "",
+      ]);
+    }
+  }
+
+  if (typeof response.carriageSvg === "string") {
+    console.log(response.carriageSvg);
+  }
+}
+
 async function handleBoard(positionals: string[], flags: Map<string, FlagValue>, departures: boolean) {
   const stationName = requireValue(firstPositionalOrFlag(positionals, flags, "station"), "station");
   const page = Number.parseInt(flagString(flags, "page") || "1", 10) || 1;
@@ -271,6 +342,7 @@ function printHelp() {
 Commands:
   stations <query> [--json]
   train-numbers <query> [--json]
+  route --from <station> --to <station> [--date DD.MM.YYYY] [--time HH:MM] [--arrival] [--min-change N] [--direct] [--grm] [--carriage-svg N] [--json]
   routes --from <station> --to <station> [--date DD.MM.YYYY] [--time HH:MM] [--arrival] [--min-change N] [--direct] [--json]
   departures <station> [--page N] [--json]
   arrivals <station> [--page N] [--json]
@@ -331,6 +403,20 @@ function flagString(flags: Map<string, FlagValue>, key: string) {
 
 function flagBool(flags: Map<string, FlagValue>, key: string) {
   return flags.get(key) === true;
+}
+
+function parseOptionalIntFlag(flags: Map<string, FlagValue>, key: string) {
+  const value = flagString(flags, key);
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Invalid --${key}: ${value}`);
+  }
+
+  return parsed;
 }
 
 function firstPositionalOrFlag(positionals: string[], flags: Map<string, FlagValue>, key: string) {
