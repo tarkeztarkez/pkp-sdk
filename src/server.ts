@@ -4,7 +4,6 @@ import {
   searchDisruptions,
   searchRoutes,
   searchStations,
-  searchTrainConsists,
   searchTrainNumbers,
 } from "./api";
 
@@ -40,7 +39,6 @@ export function startServer(options: ServerOptions = {}) {
               "/arrivals",
               "/delays",
               "/disruptions",
-              "/train-consists",
               "/openapi.json",
             ],
           });
@@ -108,15 +106,6 @@ export function startServer(options: ServerOptions = {}) {
             await searchDisruptions({
               station: requiredParam(url, "station"),
               date: optionalParam(url, "date"),
-            }),
-          );
-        }
-
-        if (request.method === "GET" && url.pathname === "/train-consists") {
-          return jsonResponse(
-            await searchTrainConsists({
-              station: requiredParam(url, "station"),
-              train: requiredParam(url, "train"),
             }),
           );
         }
@@ -403,94 +392,6 @@ function buildOpenApiDocument(host: string, port: number) {
           required: ["ref", "station", "date", "count", "disruptions"],
           additionalProperties: false,
         },
-        TrainConsistSequenceItem: {
-          type: "object",
-          properties: {
-            raw: { type: "string" },
-            kind: { type: "string", enum: ["carriage", "marker"] },
-            carriageNumber: { type: "string" },
-            noteNumber: { type: "string" },
-          },
-          required: ["raw", "kind", "carriageNumber", "noteNumber"],
-          additionalProperties: false,
-        },
-        TrainConsistVariant: {
-          type: "object",
-          properties: {
-            relation: { type: "string" },
-            consistRaw: { type: "string" },
-            sequence: {
-              type: "array",
-              items: schemaRef("TrainConsistSequenceItem"),
-            },
-            validity: {
-              type: "array",
-              items: { type: "string" },
-            },
-            notes: {
-              type: "array",
-              items: { type: "string" },
-            },
-          },
-          required: ["relation", "consistRaw", "sequence", "validity", "notes"],
-          additionalProperties: false,
-        },
-        TrainConsistEntry: {
-          type: "object",
-          properties: {
-            page: { type: "integer" },
-            departureTime: { type: "string" },
-            platform: { type: "string" },
-            track: { type: "string" },
-            trainNumber: { type: "string" },
-            trainName: { type: "string" },
-            destinations: {
-              type: "array",
-              items: { type: "string" },
-            },
-            variants: {
-              type: "array",
-              items: schemaRef("TrainConsistVariant"),
-            },
-          },
-          required: ["page", "departureTime", "platform", "track", "trainNumber", "trainName", "destinations", "variants"],
-          additionalProperties: false,
-        },
-        TrainConsistsQuery: {
-          type: "object",
-          properties: {
-            station: { type: "string" },
-            train: { type: "string" },
-          },
-          required: ["station", "train"],
-          additionalProperties: false,
-        },
-        TrainConsistsStation: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-            pdfUrl: { type: "string" },
-          },
-          required: ["name", "pdfUrl"],
-          additionalProperties: false,
-        },
-        TrainConsistsResponse: {
-          type: "object",
-          properties: {
-            query: schemaRef("TrainConsistsQuery"),
-            station: schemaRef("TrainConsistsStation"),
-            validFrom: { type: "string" },
-            validTo: { type: "string" },
-            count: { type: "integer" },
-            variantCount: { type: "integer" },
-            matches: {
-              type: "array",
-              items: schemaRef("TrainConsistEntry"),
-            },
-          },
-          required: ["query", "station", "validFrom", "validTo", "count", "variantCount", "matches"],
-          additionalProperties: false,
-        },
         ServerIndexResponse: {
           type: "object",
           properties: {
@@ -582,17 +483,6 @@ function buildOpenApiDocument(host: string, port: number) {
             queryParam("date", "Date in DD.MM.YYYY"),
           ],
           responses: successResponse("Disruption results", "DisruptionsResponse"),
-        },
-      },
-      "/train-consists": {
-        get: {
-          operationId: "searchTrainConsists",
-          summary: "Get parsed Intercity train consist data for a station PDF and train",
-          parameters: [
-            queryParam("station", "Station name from the Intercity train consist list", true),
-            queryParam("train", "Train number or train label fragment", true),
-          ],
-          responses: successResponse("Train consist results", "TrainConsistsResponse"),
         },
       },
       "/openapi.json": {
