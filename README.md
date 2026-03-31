@@ -1,6 +1,6 @@
-# pkp cli
+# pkp sdk
 
-CLI for `portalpasazera.pl`, built with Bun and TypeScript.
+SDK and CLI for `portalpasazera.pl`, built with Bun and TypeScript.
 
 Examples:
 
@@ -55,13 +55,13 @@ The server enables permissive CORS and exposes an OpenAPI 3.1 document at `/open
 Build the image:
 
 ```bash
-docker build -t pkp-cli .
+docker build -t pkp-sdk .
 ```
 
 Run the REST server:
 
 ```bash
-docker run --rm -p 3000:3000 pkp-cli
+docker run --rm -p 3000:3000 pkp-sdk
 ```
 
 Then use:

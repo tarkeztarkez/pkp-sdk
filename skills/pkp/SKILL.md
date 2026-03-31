@@ -1,11 +1,11 @@
 ---
 name: pkp
-description: Use this skill when working with the pkp CLI or when you need to query portalpasazera.pl data through the global `pkp` command. Covers command syntax, station matching behavior, and machine-readable output with the --json flag.
+description: Use this skill when working with the pkp SDK CLI or when you need to query portalpasazera.pl data through the global `pkp` command. Covers command syntax, station matching behavior, and machine-readable output with the --json flag.
 ---
 
-# PKP CLI
+# PKP SDK
 
-Use this skill when you need to run or explain the `pkp` CLI.
+Use this skill when you need to run or explain the `pkp` CLI exposed by the SDK.
 
 ## Quick start
 
@@ -46,7 +46,7 @@ disruptions --station <station> [--date DD.MM.YYYY] [--json]
 
 Commands that need a station name first query the station search endpoint.
 
-- If there is a case-insensitive exact name match, the CLI uses it.
+- If there is a case-insensitive exact name match, the SDK CLI uses it.
 - Otherwise, it takes the first search result.
 - If no station matches, the command fails.
 
@@ -87,7 +87,7 @@ pkp departures "Warszawa Centralna" --json | jq '.entries[] | {time, trainNumber
 
 ## JSON shapes
 
-Use these top-level shapes when consuming the CLI programmatically.
+Use these top-level shapes when consuming the SDK CLI programmatically.
 
 ### `stations --json`
 

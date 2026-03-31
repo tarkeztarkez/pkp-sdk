@@ -1,5 +1,5 @@
 {
-  "name": "pkp-cli",
+  "name": "pkp-sdk",
   "module": "index.ts",
   "bin": {
     "pkp": "./index.ts"

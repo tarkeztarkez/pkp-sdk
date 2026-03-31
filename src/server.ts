@@ -31,7 +31,7 @@ export function startServer(options: ServerOptions = {}) {
       try {
         if (request.method === "GET" && url.pathname === "/") {
           return jsonResponse({
-            name: "pkp-cli server",
+            name: "pkp-sdk server",
             endpoints: [
               "/stations",
               "/train-numbers",
@@ -148,9 +148,9 @@ function buildOpenApiDocument(host: string, port: number) {
   return {
     openapi: "3.1.0",
     info: {
-      title: "pkp-cli REST API",
+      title: "pkp-sdk REST API",
       version: "1.0.0",
-      description: "REST wrapper around pkp-cli queries for portalpasazera.pl.",
+      description: "REST wrapper around pkp-sdk queries for portalpasazera.pl.",
     },
     servers: [{ url: serverUrl }],
     components: {
