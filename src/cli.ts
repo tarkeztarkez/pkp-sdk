@@ -151,6 +151,7 @@ async function handleRoutes(flags: Map<string, FlagValue>) {
         `Carrier: ${item.carrier}`,
         `Duration: ${item.duration}`,
         `Transfers: ${item.transfers}`,
+        `Price: ${formatTicketPrice(item.ticketPrice, item.ticketPriceCurrency)}`,
         `Platforms: ${fallbackText(item.departurePlatform)} -> ${fallbackText(item.arrivalPlatform)}`,
         item.relation ? `Relation: ${item.relation}` : "",
         item.detailsUrl ? `Details: ${item.detailsUrl}` : "",
@@ -451,4 +452,12 @@ function formatConsistCarriage(carriageNumber: string, noteNumber: string) {
   }
 
   return noteNumber ? `${carriageNumber}(${noteNumber})` : carriageNumber;
+}
+
+function formatTicketPrice(price: number | null, currency: string | null) {
+  if (price === null || !currency) {
+    return "N/A";
+  }
+
+  return `${price.toFixed(2)} ${currency}`;
 }

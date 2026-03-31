@@ -1,4 +1,5 @@
 import { PortalSession, type Station } from "./client";
+import { buildBilkomRouteKey, fetchBilkomRoutePrices } from "./bilkom";
 import { getTrainConsists } from "./intercity";
 import {
   parseDelayResults,
@@ -44,6 +45,10 @@ export type RoutesResponse = {
   routes: Array<
     ReturnType<typeof parseRoutes>[number] & {
       detailsUrl: string;
+      ticketPrice: number | null;
+      ticketPriceCurrency: "PLN" | null;
+      ticketPriceSource: "bilkom" | null;
+      ticketPriceAvailable: boolean;
     }
   >;
 };
@@ -171,6 +176,23 @@ export async function searchRoutes(input: {
   });
 
   const results = parseRoutes(html);
+  const bilkomPrices = await fetchBilkomRoutePrices({
+    from,
+    to,
+    date,
+    time,
+    departureMode,
+    minChangeMinutes,
+    direct,
+  }).catch(() => []);
+  const bilkomPricesByKey = new Map(bilkomPrices.map((item) => [item.routeKey, item]));
+  const bilkomPricesByTimeKey = new Map<string, typeof bilkomPrices>();
+  for (const item of bilkomPrices) {
+    const timeKey = buildBilkomTimeKey(item.routeKey);
+    const current = bilkomPricesByTimeKey.get(timeKey) ?? [];
+    current.push(item);
+    bilkomPricesByTimeKey.set(timeKey, current);
+  }
 
   return {
     ref,
@@ -184,11 +206,50 @@ export async function searchRoutes(input: {
       direct,
     },
     count: results.length,
-    routes: results.map((item) => ({
-      ...item,
-      detailsUrl: item.detailsUrl ? absoluteUrl(item.detailsUrl) : "",
-    })),
+    routes: results.map((item) => {
+      const priceMatch = bilkomPricesByKey.get(
+        buildBilkomRouteKey({
+          departureDate: item.departureDate,
+          departureTime: item.departureTime,
+          arrivalDate: item.arrivalDate,
+          arrivalTime: item.arrivalTime,
+          transfers: item.transfers,
+          category: item.category,
+          trainNumber: item.trainNumber,
+        }),
+      ) ?? findUniqueBilkomTimeMatch(bilkomPricesByTimeKey, item);
+
+      return {
+        ...item,
+        detailsUrl: item.detailsUrl ? absoluteUrl(item.detailsUrl) : "",
+        ticketPrice: priceMatch?.ticketPrice ?? null,
+        ticketPriceCurrency: priceMatch?.ticketPriceCurrency ?? null,
+        ticketPriceSource: priceMatch?.ticketPriceSource ?? null,
+        ticketPriceAvailable: priceMatch?.ticketPriceAvailable ?? false,
+      };
+    }),
   };
+}
+
+function findUniqueBilkomTimeMatch(
+  bilkomPricesByTimeKey: Map<string, Array<{ routeKey: string; ticketPrice: number | null; ticketPriceCurrency: "PLN" | null; ticketPriceSource: "bilkom" | null; ticketPriceAvailable: boolean }>>,
+  route: ReturnType<typeof parseRoutes>[number],
+) {
+  const matches = bilkomPricesByTimeKey.get(
+    [
+      route.departureDate,
+      route.departureTime,
+      route.arrivalDate,
+      route.arrivalTime,
+      String(route.transfers),
+    ].join("|"),
+  );
+
+  return matches?.length === 1 ? matches[0] : undefined;
+}
+
+function buildBilkomTimeKey(routeKey: string) {
+  return routeKey.split("|").slice(0, 5).join("|");
 }
 
 export async function getStationBoard(input: {

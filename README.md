@@ -19,6 +19,8 @@ bun run index.ts server serve --port 3000
 
 All commands support `--json` for machine-readable output. Without it, the CLI prints a human-readable summary.
 
+`routes` enriches Portal Pasażera route results with best-effort Bilkom ticket pricing. When Bilkom cannot match a route, price fields are returned as `null` in JSON and shown as `N/A` in text output.
+
 ## REST API
 
 Start the local server:
@@ -44,11 +46,11 @@ The server enables permissive CORS and exposes an OpenAPI 3.1 document at `/open
 
 ## Intercity Train Consists
 
-`train-consists` uses the public PKP Intercity station PDF list at `zestawienia-pociagow.html`, downloads the matching station PDF, runs `pdftotext -tsv`, and returns parsed train consist data instead of a raw PDF link.
+`train-consists` uses the public PKP Intercity station PDF list at `zestawienia-pociagow.html`, downloads the matching station PDF, sends it to Gemini with structured output, and returns parsed train consist data instead of a raw PDF link.
 
 The response shape groups results into train matches with nested `variants`, so a single train block can expose multiple possible zestawienia with separate validity notes, diagram lines, and left-to-right carriage sequences.
 
-This feature requires the `pdftotext` binary to be installed on the system.
+This feature requires `GEMINI_API_KEY` in the local environment. `GEMINI_MODEL` is optional.
 
 ## Docker
 
