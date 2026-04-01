@@ -1,6 +1,6 @@
 {
   "name": "pkp-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "files": [
     "dist"
@@ -12,9 +12,11 @@
     }
   },
   "main": "./dist/index.js",
+  "react-native": "./dist/index.js",
+  "browser": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target node && cp ./src/index.d.ts ./dist/index.d.ts && cp ./src/types.ts ./dist/types.d.ts",
+    "build": "bun build ./src/index.ts --outdir ./dist --target browser && cp ./src/index.d.ts ./dist/index.d.ts && cp ./src/types.ts ./dist/types.d.ts",
     "typecheck": "tsc -p ./tsconfig.json",
     "test": "bun test ./src"
   }

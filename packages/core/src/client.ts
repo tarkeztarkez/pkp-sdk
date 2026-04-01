@@ -23,6 +23,7 @@ export class PortalSession {
   private cookies = new Map<string, string>();
   private token = "";
   private ajaxHeaders = new Map<string, string>();
+  private readonly supportsManualCookies = hasManualCookieSupport();
 
   async init(section: PortalSection = "/"): Promise<string> {
     const html = await this.getText(section);
@@ -257,7 +258,7 @@ export class PortalSession {
     }
 
     const cookieHeader = this.serializeCookies();
-    if (cookieHeader) {
+    if (this.supportsManualCookies && cookieHeader) {
       headers.set("Cookie", cookieHeader);
     }
 
@@ -279,12 +280,19 @@ export class PortalSession {
   }
 
   private async fetch(input: string, init: RequestInit): Promise<Response> {
-    const response = await fetch(input, init);
+    const response = await fetch(input, {
+      ...init,
+      credentials: "include",
+    });
     this.captureCookies(response);
     return response;
   }
 
   private captureCookies(response: Response) {
+    if (!this.supportsManualCookies) {
+      return;
+    }
+
     const setCookies = response.headers.getSetCookie?.() ?? [];
 
     for (const cookie of setCookies) {
@@ -362,4 +370,12 @@ function hasLeadingZeroBits(bytes: Uint8Array, bits: number) {
 
 function matchSingle(source: string, pattern: RegExp) {
   return pattern.exec(source)?.[1] ?? "";
+}
+
+function hasManualCookieSupport() {
+  try {
+    return typeof new Headers().getSetCookie === "function";
+  } catch {
+    return false;
+  }
 }

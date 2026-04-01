@@ -37,9 +37,6 @@
     "packages/ts-sdk": {
       "name": "pkp-sdk",
       "version": "0.1.0",
-      "dependencies": {
-        "@pkp-sdk/core": "workspace:*",
-      },
     },
   },
   "packages": {

@@ -1,4 +1,4 @@
-import { load } from "cheerio";
+import { load } from "cheerio/slim";
 
 const BILKOM_BASE_URL = "https://bilkom.pl";
 const DEFAULT_CARRIER_KEYS = "PZ,P2,P3,P1,P5,P7,P9,P0,O1,P4";
@@ -565,7 +565,7 @@ async function getBilkomGrmAuthHeader() {
 }
 
 async function resolveBilkomGrmAuthHeader() {
-  const configured = process.env.BILKOM_GRM_BASIC_AUTH?.trim();
+  const configured = readEnv("BILKOM_GRM_BASIC_AUTH")?.trim();
   if (configured) {
     return configured.startsWith("Basic ") ? configured : `Basic ${configured}`;
   }
@@ -584,7 +584,7 @@ async function resolveBilkomGrmAuthHeader() {
     throw new Error("Could not discover Bilkom GRM authorization header.");
   }
 
-  return `Basic ${Buffer.from(creds, "utf8").toString("base64")}`;
+  return `Basic ${encodeBase64Utf8(creds)}`;
 }
 
 function buildBilkomGrmTrainRequest(input: BilkomGrmJourney) {
@@ -723,6 +723,26 @@ function normalizeRouteToken(value: string) {
 
 function cleanToken(value: string | undefined) {
   return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function readEnv(name: string) {
+  const value = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[name];
+  return typeof value === "string" ? value : undefined;
+}
+
+function encodeBase64Utf8(value: string) {
+  if (typeof btoa === "function") {
+    return btoa(unescape(encodeURIComponent(value)));
+  }
+
+  const maybeBuffer = (globalThis as {
+    Buffer?: { from(input: string, encoding?: string): { toString(encoding: string): string } };
+  }).Buffer;
+  if (maybeBuffer) {
+    return maybeBuffer.from(value, "utf8").toString("base64");
+  }
+
+  throw new Error("No base64 encoder is available in this runtime.");
 }
 
 function normalizeNumberArray(value: unknown) {
