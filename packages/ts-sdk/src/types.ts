@@ -125,6 +125,7 @@ export type RoutesQuery = {
 
 export type RouteWithPrice = RouteResult & {
   detailsUrl: string;
+  bilkomBuyLink: string | null;
   ticketPrice: number | null;
   ticketPriceCurrency: "PLN" | null;
   ticketPriceSource: "bilkom" | null;
@@ -195,6 +196,7 @@ export type SearchRoutesInput = {
   arrival?: boolean;
   minChange?: number;
   direct?: boolean;
+  discount?: number;
 };
 
 export type SearchRouteInput = SearchRoutesInput & {

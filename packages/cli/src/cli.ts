@@ -14,6 +14,7 @@ import {
 } from "../../core/src";
 import { cleanText } from "../../core/src";
 import { startServer } from "../../api/src/server";
+import { generateRoutesInfographic } from "./infographic";
 
 type FlagValue = string | boolean;
 
@@ -115,15 +116,26 @@ async function handleTrainNumbers(positionals: string[], flags: Map<string, Flag
 async function handleRoutes(flags: Map<string, FlagValue>) {
   const from = requireValue(flagString(flags, "from"), "--from");
   const to = requireValue(flagString(flags, "to"), "--to");
+  const minChange = Number.parseInt(flagString(flags, "min-change") || "3", 10);
+  const discount = parseOptionalNumberFlag(flags, "discount") ?? 0;
+  const maxPrice = parseOptionalNumberFlag(flags, "max-price");
   const response = await searchRoutes({
     from,
     to,
     date: normalizeDate(flagString(flags, "date") || todayLocalDate()),
     time: normalizeTime(flagString(flags, "time") || nowLocalTimeRounded()),
-    minChange: Number.parseInt(flagString(flags, "min-change") || "3", 10),
+    minChange,
     arrival: flagBool(flags, "arrival"),
     direct: flagBool(flags, "direct"),
+    discount,
+    maxPrice,
   });
+
+  if (flags.has("infographic")) {
+    await generateRoutesInfographic(response, requireValue(flagString(flags, "infographic"), "--infographic"), {
+      discount,
+    });
+  }
 
   if (flagBool(flags, "json")) {
     printJson(response);
@@ -135,6 +147,7 @@ async function handleRoutes(flags: Map<string, FlagValue>) {
     `${response.query.departureMode ? "Depart after" : "Arrive by"}: ${response.query.time}`,
     `Min change: ${response.query.minChangeMinutes} min`,
     `Direct only: ${response.query.direct ? "yes" : "no"}`,
+    `Max price: ${response.query.maxPrice === null ? "none" : formatTicketPrice(response.query.maxPrice, "PLN")}`,
     `Ref: ${response.ref}`,
   ]);
   if (response.routes.length === 0) {
@@ -152,9 +165,12 @@ async function handleRoutes(flags: Map<string, FlagValue>) {
         `Duration: ${item.duration}`,
         `Transfers: ${item.transfers}`,
         `Price: ${formatTicketPrice(item.ticketPrice, item.ticketPriceCurrency)}`,
+        item.ticketPriceSource ? `Price source: ${item.ticketPriceSource}` : "",
         `Platforms: ${fallbackText(item.departurePlatform)} -> ${fallbackText(item.arrivalPlatform)}`,
         item.relation ? `Relation: ${item.relation}` : "",
         item.detailsUrl ? `Details: ${item.detailsUrl}` : "",
+        item.bilkomBuyLink ? `Bilkom: ${item.bilkomBuyLink}` : "",
+        item.regiojetBuyLink ? `RegioJet: ${item.regiojetBuyLink}` : "",
       ],
       true,
     );
@@ -172,6 +188,8 @@ async function handleRoute(flags: Map<string, FlagValue>) {
     minChange: Number.parseInt(flagString(flags, "min-change") || "3", 10),
     arrival: flagBool(flags, "arrival"),
     direct: flagBool(flags, "direct"),
+    discount: parseOptionalNumberFlag(flags, "discount") ?? 0,
+    maxPrice: parseOptionalNumberFlag(flags, "max-price"),
     grm: flagBool(flags, "grm"),
     carriageSvg: parseOptionalIntFlag(flags, "carriage-svg"),
   });
@@ -186,6 +204,7 @@ async function handleRoute(flags: Map<string, FlagValue>) {
     `${response.query.departureMode ? "Depart after" : "Arrive by"}: ${response.query.time}`,
     `Min change: ${response.query.minChangeMinutes} min`,
     `Direct only: ${response.query.direct ? "yes" : "no"}`,
+    `Max price: ${response.query.maxPrice === null ? "none" : formatTicketPrice(response.query.maxPrice, "PLN")}`,
     `Ref: ${response.ref}`,
   ]);
 
@@ -198,9 +217,12 @@ async function handleRoute(flags: Map<string, FlagValue>) {
       `Duration: ${response.route.duration}`,
       `Transfers: ${response.route.transfers}`,
       `Price: ${formatTicketPrice(response.route.ticketPrice, response.route.ticketPriceCurrency)}`,
+      response.route.ticketPriceSource ? `Price source: ${response.route.ticketPriceSource}` : "",
       `Platforms: ${fallbackText(response.route.departurePlatform)} -> ${fallbackText(response.route.arrivalPlatform)}`,
       response.route.relation ? `Relation: ${response.route.relation}` : "",
       response.route.detailsUrl ? `Details: ${response.route.detailsUrl}` : "",
+      response.route.bilkomBuyLink ? `Bilkom: ${response.route.bilkomBuyLink}` : "",
+      response.route.regiojetBuyLink ? `RegioJet: ${response.route.regiojetBuyLink}` : "",
     ],
     true,
   );
@@ -342,8 +364,8 @@ function printHelp() {
 Commands:
   stations <query> [--json]
   train-numbers <query> [--json]
-  route --from <station> --to <station> [--date DD.MM.YYYY] [--time HH:MM] [--arrival] [--min-change N] [--direct] [--grm] [--carriage-svg N] [--json]
-  routes --from <station> --to <station> [--date DD.MM.YYYY] [--time HH:MM] [--arrival] [--min-change N] [--direct] [--json]
+  route --from <station> --to <station> [--date DD.MM.YYYY] [--time HH:MM] [--arrival] [--min-change N] [--direct] [--discount PERCENT] [--max-price PLN] [--grm] [--carriage-svg N] [--json]
+  routes --from <station> --to <station> [--date DD.MM.YYYY] [--time HH:MM] [--arrival] [--min-change N] [--direct] [--discount PERCENT] [--max-price PLN] [--infographic PATH] [--json]
   departures <station> [--page N] [--json]
   arrivals <station> [--page N] [--json]
   delays --station <station> [--arrival] [--json]
@@ -412,6 +434,20 @@ function parseOptionalIntFlag(flags: Map<string, FlagValue>, key: string) {
   }
 
   const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Invalid --${key}: ${value}`);
+  }
+
+  return parsed;
+}
+
+function parseOptionalNumberFlag(flags: Map<string, FlagValue>, key: string) {
+  const value = flagString(flags, key);
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
     throw new Error(`Invalid --${key}: ${value}`);
   }

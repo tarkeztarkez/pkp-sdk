@@ -43,6 +43,8 @@ bun run --filter @pkp-sdk/cli start -- server serve --port 3000
 
 All commands support `--json` for machine-readable output. `route` returns the first matching route. `--grm` attaches Bilkom GRM data. `--carriage-svg <number>` implies `--grm`.
 
+Route JSON now includes `bilkomBuyLink` when Portal Pasażera resolves the route to a direct Bilkom purchase URL; otherwise the field is `null`.
+
 ## API
 
 Run the Bun API package:

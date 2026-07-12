@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildBilkomRouteKey, parseBilkomJourneys } from "./bilkom";
+import { buildBilkomBuyLink, buildBilkomRouteKey, parseBilkomJourneys } from "./bilkom";
 
 describe("buildBilkomRouteKey", () => {
   test("normalizes portal and bilkom date tokens into the same key", () => {
@@ -49,5 +49,30 @@ describe("parseBilkomJourneys", () => {
     expect(journeys[0]?.routeKey).toBe("31.03.2026|17:36|31.03.2026|20:16|0|IC|110");
     expect(journeys[0]?.request.tripId).toBe("TRIP-1");
     expect(journeys[0]?.request.offeredTrains[0]?.stationIds).toEqual(["5100065", "5100020"]);
+  });
+});
+
+describe("buildBilkomBuyLink", () => {
+  test("builds a direct cart link from Bilkom journey metadata", () => {
+    const journeys = parseBilkomJourneys(`
+      <ul id="trips">
+        <li class="el" data-trip-id="TRIP-1">
+          <div class="carrier-metadata"
+            data-partoftrip="PART-1"
+            data-number="40927"
+            data-carrierid="KS"
+            data-startdate="12-07-2026 18:00 CEST"
+            data-arrivaldate="12-07-2026 18:03 CEST"
+            data-departure="5100020"
+            data-arrival="5101527"
+            data-stations="5100020;5101527"
+            data-partoftripobj='{"id":"PART-1"}'></div>
+        </li>
+      </ul>
+    `);
+
+    expect(buildBilkomBuyLink(journeys[0]!.request)).toBe(
+      "https://bilkom.pl/koszyk/train?items%5B0%5D.date=120720261800&items%5B0%5D.fromStation=5100020&items%5B0%5D.toStation=5101527&items%5B0%5D.number=40927&cart=true",
+    );
   });
 });

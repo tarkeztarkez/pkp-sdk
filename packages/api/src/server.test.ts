@@ -11,9 +11,13 @@ describe("server openapi", () => {
       const json = (await response.json()) as any;
       const routeSchema = json.components.schemas.Route;
 
+      expect(routeSchema.properties.bilkomBuyLink.type).toEqual(["string", "null"]);
+      expect(routeSchema.properties.regiojetBuyLink.type).toEqual(["string", "null"]);
       expect(routeSchema.properties.ticketPrice.type).toEqual(["number", "null"]);
       expect(routeSchema.properties.ticketPriceCurrency.enum).toEqual(["PLN", null]);
-      expect(routeSchema.properties.ticketPriceSource.enum).toEqual(["bilkom", null]);
+      expect(routeSchema.properties.ticketPriceSource.enum).toEqual(["bilkom", "regiojet", "bilkom+regiojet", null]);
+      expect(routeSchema.required).toContain("bilkomBuyLink");
+      expect(routeSchema.required).toContain("regiojetBuyLink");
       expect(routeSchema.required).toContain("ticketPriceAvailable");
     } finally {
       server.stop(true);
@@ -28,13 +32,20 @@ describe("server openapi", () => {
       const response = await fetch(`http://127.0.0.1:${port}/openapi.json`);
       const json = (await response.json()) as any;
       const routePath = json.paths["/route"]?.get;
+      const routesPath = json.paths["/routes"]?.get;
+      const routesQuerySchema = json.components.schemas.RoutesQuery;
       const routeResponseSchema = json.components.schemas.RouteResponse;
       const routeGrmSchema = json.components.schemas.RouteGrm;
 
       expect(routePath).toBeTruthy();
+      expect(routesPath).toBeTruthy();
+      expect(routesPath.parameters.some((item: any) => item.name === "maxPrice")).toBe(true);
       expect(routePath.parameters.some((item: any) => item.name === "grm")).toBe(true);
       expect(routePath.parameters.some((item: any) => item.name === "carriageSvg")).toBe(true);
+      expect(routePath.parameters.some((item: any) => item.name === "maxPrice")).toBe(true);
       expect(routePath.responses["404"]).toBeTruthy();
+      expect(routesQuerySchema.properties.maxPrice.type).toEqual(["number", "null"]);
+      expect(routesQuerySchema.required).toContain("maxPrice");
       expect(routeResponseSchema.properties.route.$ref).toBe("#/components/schemas/Route");
       expect(routeResponseSchema.properties.grm.oneOf[0].$ref).toBe("#/components/schemas/RouteGrm");
       expect(routeResponseSchema.properties.carriageSvg.oneOf[0].type).toBe("string");

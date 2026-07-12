@@ -9,12 +9,15 @@ import {
   type BilkomGrmCarriagesResponse,
   type BilkomGrmTrainComposition,
 } from "./bilkom";
+import { fetchRegioJetRoutePrice, isRegioJetUrl } from "./regiojet";
 import {
   parseDelayResults,
   parseDisruptions,
   parseRoutes,
   parseStationBoard,
 } from "./parsers";
+
+export type TicketPriceSource = "bilkom" | "regiojet" | "bilkom+regiojet";
 
 export type StationsResponse = {
   query: string;
@@ -47,14 +50,17 @@ export type RoutesResponse = {
     departureMode: boolean;
     minChangeMinutes: number;
     direct: boolean;
+    maxPrice: number | null;
   };
   count: number;
   routes: Array<
-    ReturnType<typeof parseRoutes>[number] & {
+    Omit<ReturnType<typeof parseRoutes>[number], "buyTicketStandardData" | "buyTicketSharedData"> & {
       detailsUrl: string;
+      bilkomBuyLink: string | null;
+      regiojetBuyLink: string | null;
       ticketPrice: number | null;
       ticketPriceCurrency: "PLN" | null;
-      ticketPriceSource: "bilkom" | null;
+      ticketPriceSource: TicketPriceSource | null;
       ticketPriceAvailable: boolean;
     }
   >;
@@ -158,12 +164,16 @@ export async function searchRoutes(input: {
   arrival?: boolean;
   minChange?: number;
   direct?: boolean;
+  discount?: number;
+  maxPrice?: number;
 }): Promise<RoutesResponse> {
   const from = requireValue(input.from, "from");
   const to = requireValue(input.to, "to");
   const date = normalizeDate(input.date || todayLocalDate());
   const time = normalizeTime(input.time || nowLocalTimeRounded());
   const minChangeMinutes = normalizePositiveInt(input.minChange, 3);
+  const discount = normalizeDiscount(input.discount);
+  const maxPrice = normalizeMaxPrice(input.maxPrice);
   const departureMode = !Boolean(input.arrival);
   const direct = Boolean(input.direct);
 
@@ -201,6 +211,34 @@ export async function searchRoutes(input: {
     bilkomPricesByTimeKey.set(timeKey, current);
   }
 
+  const pricedRoutes = await Promise.all(results.map(async (item) => {
+      const { buyTicketStandardData: _buyTicketStandardData, buyTicketSharedData: _buyTicketSharedData, ...route } = item;
+      const priceMatch = bilkomPricesByKey.get(
+        buildBilkomRouteKey({
+          departureDate: route.departureDate,
+          departureTime: route.departureTime,
+          arrivalDate: route.arrivalDate,
+          arrivalTime: route.arrivalTime,
+          transfers: route.transfers,
+          category: route.category,
+          trainNumber: route.trainNumber,
+        }),
+      ) ?? findUniqueBilkomTimeMatch(bilkomPricesByTimeKey, item);
+      const bilkomBuyLink = await resolveBilkomBuyLink(session, item) ?? priceMatch?.bilkomBuyLink ?? null;
+
+      return {
+        ...route,
+        detailsUrl: route.detailsUrl ? absoluteUrl(route.detailsUrl) : "",
+        ...(await resolveRoutePricing(session, item, {
+          discount,
+          bilkomRoutePrice: priceMatch ?? null,
+          minChangeMinutes,
+          bilkomBuyLink,
+        })),
+      };
+    }));
+  const routes = pricedRoutes.filter((route) => route.ticketPrice === null || maxPrice === null || route.ticketPrice <= maxPrice);
+
   return {
     ref,
     query: {
@@ -211,30 +249,10 @@ export async function searchRoutes(input: {
       departureMode,
       minChangeMinutes,
       direct,
+      maxPrice,
     },
-    count: results.length,
-    routes: results.map((item) => {
-      const priceMatch = bilkomPricesByKey.get(
-        buildBilkomRouteKey({
-          departureDate: item.departureDate,
-          departureTime: item.departureTime,
-          arrivalDate: item.arrivalDate,
-          arrivalTime: item.arrivalTime,
-          transfers: item.transfers,
-          category: item.category,
-          trainNumber: item.trainNumber,
-        }),
-      ) ?? findUniqueBilkomTimeMatch(bilkomPricesByTimeKey, item);
-
-      return {
-        ...item,
-        detailsUrl: item.detailsUrl ? absoluteUrl(item.detailsUrl) : "",
-        ticketPrice: priceMatch?.ticketPrice ?? null,
-        ticketPriceCurrency: priceMatch?.ticketPriceCurrency ?? null,
-        ticketPriceSource: priceMatch?.ticketPriceSource ?? null,
-        ticketPriceAvailable: priceMatch?.ticketPriceAvailable ?? false,
-      };
-    }),
+    count: routes.length,
+    routes,
   };
 }
 
@@ -246,6 +264,8 @@ export async function searchRoute(input: {
   arrival?: boolean;
   minChange?: number;
   direct?: boolean;
+  discount?: number;
+  maxPrice?: number;
   grm?: boolean;
   carriageSvg?: number;
 }): Promise<RouteResponse> {
@@ -327,7 +347,7 @@ export async function searchRoute(input: {
 }
 
 function findUniqueBilkomTimeMatch(
-  bilkomPricesByTimeKey: Map<string, Array<{ routeKey: string; ticketPrice: number | null; ticketPriceCurrency: "PLN" | null; ticketPriceSource: "bilkom" | null; ticketPriceAvailable: boolean }>>,
+  bilkomPricesByTimeKey: Map<string, Array<{ routeKey: string; bilkomBuyLink: string | null; ticketPrice: number | null; ticketPriceCurrency: "PLN" | null; ticketPriceSource: "bilkom" | null; ticketPriceAvailable: boolean }>>,
   route: ReturnType<typeof parseRoutes>[number],
 ) {
   const matches = bilkomPricesByTimeKey.get(
@@ -345,6 +365,431 @@ function findUniqueBilkomTimeMatch(
 
 function buildBilkomTimeKey(routeKey: string) {
   return routeKey.split("|").slice(0, 5).join("|");
+}
+
+export function applyDiscountToTicketPrice(price: number | null, discount: number) {
+  if (price === null) {
+    return null;
+  }
+
+  return Math.round(price * (1 - discount / 100) * 100) / 100;
+}
+
+function normalizeDiscount(value: number | undefined) {
+  if (value === undefined) {
+    return 0;
+  }
+
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new Error(`Invalid discount: ${String(value)}`);
+  }
+
+  return value;
+}
+
+function normalizeMaxPrice(value: number | undefined) {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`Invalid maxPrice: ${String(value)}`);
+  }
+
+  return value;
+}
+
+async function resolveBilkomBuyLink(
+  session: PortalSession,
+  route: ReturnType<typeof parseRoutes>[number],
+) {
+  const buyTicketIds = orderedPortalBuyTicketIds(route.buyTicketStandardData, route.buyTicketSharedData);
+
+  for (const buyTicketId of buyTicketIds) {
+    try {
+      const url = await session.resolveBuyTicketUrl(buyTicketId);
+      if (url && isBilkomUrl(url)) {
+        return url;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function resolveRoutePricing(
+  session: PortalSession,
+  route: ReturnType<typeof parseRoutes>[number],
+  context: {
+    discount: number;
+    bilkomRoutePrice: { ticketPrice: number | null; ticketPriceCurrency: "PLN" | null; ticketPriceSource: "bilkom" | null; ticketPriceAvailable: boolean } | null;
+    minChangeMinutes: number;
+    bilkomBuyLink: string | null;
+  },
+): Promise<{
+  bilkomBuyLink: string | null;
+  regiojetBuyLink: string | null;
+  ticketPrice: number | null;
+  ticketPriceCurrency: "PLN" | null;
+  ticketPriceSource: TicketPriceSource | null;
+  ticketPriceAvailable: boolean;
+}> {
+  const offers = mergePortalBuyOffers(route.buyTicketStandardData, route.buyTicketSharedData, {
+    departureDate: route.departureDate,
+    arrivalDate: route.arrivalDate,
+  });
+  const hasRegioJetOffer = offers.some((offer) => offer.carrierCodes.includes("RJ"));
+
+  if (!hasRegioJetOffer) {
+    return {
+      bilkomBuyLink: context.bilkomBuyLink,
+      regiojetBuyLink: null,
+      ticketPrice: applyDiscountToTicketPrice(context.bilkomRoutePrice?.ticketPrice ?? null, context.discount),
+      ticketPriceCurrency: context.bilkomRoutePrice?.ticketPriceCurrency ?? null,
+      ticketPriceSource: context.bilkomRoutePrice?.ticketPriceSource ?? null,
+      ticketPriceAvailable: context.bilkomRoutePrice?.ticketPriceAvailable ?? false,
+    };
+  }
+
+  let bilkomComponent: number | null = null;
+  let regiojetComponent: number | null = null;
+  let bilkomBuyLink: string | null = context.bilkomBuyLink;
+  let regiojetBuyLink: string | null = null;
+
+  for (const offer of offers) {
+    const candidates = await Promise.all(offer.buyTicketIds.map(async (buyTicketId) => {
+      const url = await session.resolveBuyTicketUrl(buyTicketId).catch(() => null);
+      return {
+        buyTicketId,
+        url,
+      };
+    }));
+
+    if (offer.carrierCodes.includes("RJ")) {
+      const regiojetCandidate = candidates.find((candidate) => candidate.url && isRegioJetUrl(candidate.url));
+      if (!regiojetCandidate?.url) {
+        return unavailablePricing(bilkomBuyLink, regiojetBuyLink);
+      }
+
+      const regiojetPrice = await fetchRegioJetRoutePrice({
+        redirectUrl: regiojetCandidate.url,
+        departureDate: offer.departureDate,
+        departureTime: offer.departureTime,
+        arrivalDate: offer.arrivalDate,
+        arrivalTime: offer.arrivalTime,
+        discount: context.discount,
+      }).catch(() => null);
+
+      if (!regiojetPrice) {
+        return unavailablePricing(bilkomBuyLink, regiojetBuyLink);
+      }
+
+      regiojetComponent = (regiojetComponent ?? 0) + regiojetPrice.ticketPrice;
+      regiojetBuyLink ||= regiojetPrice.regiojetBuyLink;
+      continue;
+    }
+
+    const bilkomCandidate = candidates.find((candidate) => candidate.url && isBilkomUrl(candidate.url));
+    if (!bilkomCandidate?.url) {
+      return unavailablePricing(bilkomBuyLink, regiojetBuyLink);
+    }
+
+    bilkomBuyLink ||= bilkomCandidate.url;
+    const bilkomPrice = await resolveBilkomPanelPrice(offer, context).catch(() => null);
+    if (bilkomPrice === null) {
+      return unavailablePricing(bilkomBuyLink, regiojetBuyLink);
+    }
+
+    bilkomComponent = (bilkomComponent ?? 0) + applyDiscountToTicketPrice(bilkomPrice, context.discount)!;
+  }
+
+  if (regiojetComponent !== null && bilkomComponent === null) {
+    return {
+      bilkomBuyLink,
+      regiojetBuyLink,
+      ticketPrice: regiojetComponent,
+      ticketPriceCurrency: "PLN",
+      ticketPriceSource: "regiojet",
+      ticketPriceAvailable: true,
+    };
+  }
+
+  if (regiojetComponent !== null && bilkomComponent !== null) {
+    return {
+      bilkomBuyLink,
+      regiojetBuyLink,
+      ticketPrice: Number((regiojetComponent + bilkomComponent).toFixed(2)),
+      ticketPriceCurrency: "PLN",
+      ticketPriceSource: "bilkom+regiojet",
+      ticketPriceAvailable: true,
+    };
+  }
+
+  return unavailablePricing(bilkomBuyLink, regiojetBuyLink);
+}
+
+async function resolveBilkomPanelPrice(
+  offer: PortalBuyOffer,
+  context: {
+    minChangeMinutes: number;
+  },
+) {
+  const prices = await fetchBilkomRoutePrices({
+    from: offer.departureStation,
+    to: offer.arrivalStation,
+    date: offer.departureDate,
+    time: offer.departureTime,
+    departureMode: true,
+    minChangeMinutes: context.minChangeMinutes,
+    direct: offer.transfers === 0,
+  });
+
+  const exactKey = buildBilkomRouteKey({
+    departureDate: offer.departureDate,
+    departureTime: offer.departureTime,
+    arrivalDate: offer.arrivalDate,
+    arrivalTime: offer.arrivalTime,
+    transfers: offer.transfers,
+    category: offer.transfers === 0 ? offer.primaryCategory : "",
+    trainNumber: offer.transfers === 0 ? offer.primaryTrainNumber : "",
+  });
+  const exactMatch = prices.find((item) => item.routeKey === exactKey);
+  if (exactMatch?.ticketPrice !== null && exactMatch?.ticketPrice !== undefined) {
+    return exactMatch.ticketPrice;
+  }
+
+  const timeMatches = prices.filter((item) => buildBilkomTimeKey(item.routeKey) === [
+    offer.departureDate,
+    offer.departureTime,
+    offer.arrivalDate,
+    offer.arrivalTime,
+    String(offer.transfers),
+  ].join("|"));
+
+  return timeMatches.length === 1 ? timeMatches[0]?.ticketPrice ?? null : null;
+}
+
+function orderedPortalBuyTicketIds(standardData: string, sharedData: string) {
+  const preferred = usesSingleCarrierBuyFlow(standardData) ? standardData : sharedData;
+  const fallback = preferred === standardData ? sharedData : standardData;
+
+  return Array.from(new Set([...extractActiveBuyTicketIds(preferred), ...extractActiveBuyTicketIds(fallback)]));
+}
+
+type PortalBuyOffer = {
+  key: string;
+  departureStation: string;
+  departureDate: string;
+  departureTime: string;
+  arrivalStation: string;
+  arrivalDate: string;
+  arrivalTime: string;
+  carrierCodes: string[];
+  transfers: number;
+  primaryCategory: string;
+  primaryTrainNumber: string;
+  buyTicketIds: string[];
+};
+
+function mergePortalBuyOffers(
+  standardData: string,
+  sharedData: string,
+  routeDates: { departureDate: string; arrivalDate: string },
+) {
+  const output = new Map<string, PortalBuyOffer>();
+
+  for (const offer of [
+    ...parsePortalBuyOffers(standardData, routeDates),
+    ...parsePortalBuyOffers(sharedData, routeDates),
+  ]) {
+    const current = output.get(offer.key);
+    if (!current) {
+      output.set(offer.key, offer);
+      continue;
+    }
+
+    output.set(offer.key, {
+      ...current,
+      buyTicketIds: Array.from(new Set([...current.buyTicketIds, ...offer.buyTicketIds])),
+    });
+  }
+
+  return [...output.values()];
+}
+
+export function parsePortalBuyOffers(
+  value: string,
+  routeDates: { departureDate: string; arrivalDate: string },
+): PortalBuyOffer[] {
+  const offers: PortalBuyOffer[] = [];
+  let currentDate = routeDates.departureDate;
+  let previousArrivalTime = "";
+
+  for (const panel of value.split("#")) {
+    if (!panel) {
+      continue;
+    }
+
+    const parts = panel.split("|").filter(Boolean);
+    if (parts.length < 2) {
+      continue;
+    }
+
+    const rawId = parts[parts.length - 1] ?? "";
+    const buyTicketId = rawId.split("&")[0]?.trim() ?? "";
+    const trainParts = parts.slice(0, -1);
+    const activeTrainParts = trainParts.filter((trainPart) => {
+      const status = trainPart.split(";")[0] ?? "";
+      return status === "1" || status === "2";
+    });
+
+    if (!buyTicketId || activeTrainParts.length === 0) {
+      continue;
+    }
+
+    const first = activeTrainParts[0]?.split(";") ?? [];
+    const last = activeTrainParts[activeTrainParts.length - 1]?.split(";") ?? [];
+    const carrierCodes = Array.from(new Set(activeTrainParts.map((trainPart) => cleanToken(trainPart.split(";")[7] ?? "")).filter(Boolean)));
+    const departureStation = cleanToken(first[1] ?? "");
+    const departureTime = cleanToken(first[3] ?? "");
+    const arrivalStation = cleanToken(last[4] ?? "");
+    const arrivalTime = cleanToken(last[6] ?? "");
+    currentDate = inferNextDate(previousArrivalTime, departureTime, currentDate);
+    const departureDate = currentDate;
+    const arrivalDate = inferNextDate(departureTime, arrivalTime, departureDate);
+    const primaryCategory = carrierCodes.length === 1 ? carrierCodes[0] ?? "" : "";
+    const primaryTrainNumber = "";
+    const key = [
+      departureStation,
+      departureDate,
+      departureTime,
+      arrivalStation,
+      arrivalDate,
+      arrivalTime,
+      carrierCodes.join(","),
+      String(Math.max(activeTrainParts.length - 1, 0)),
+    ].join("|");
+
+    offers.push({
+      key,
+      departureStation,
+      departureDate,
+      departureTime,
+      arrivalStation,
+      arrivalDate,
+      arrivalTime,
+      carrierCodes,
+      transfers: Math.max(activeTrainParts.length - 1, 0),
+      primaryCategory,
+      primaryTrainNumber,
+      buyTicketIds: [buyTicketId],
+    });
+
+    currentDate = arrivalDate;
+    previousArrivalTime = arrivalTime;
+  }
+
+  return offers;
+}
+
+function usesSingleCarrierBuyFlow(standardData: string) {
+  let previousCarrier = "";
+
+  for (const panel of standardData.split("#")) {
+    if (!panel) {
+      continue;
+    }
+
+    const trainParts = panel.split("|").slice(0, -1);
+    for (const trainPart of trainParts) {
+      if (!trainPart) {
+        continue;
+      }
+
+      const carrier = trainPart.split(";")[7] ?? "";
+      if (previousCarrier && previousCarrier !== carrier) {
+        return false;
+      }
+      previousCarrier = carrier;
+    }
+  }
+
+  return true;
+}
+
+function extractActiveBuyTicketIds(value: string) {
+  const output: string[] = [];
+
+  for (const panel of value.split("#")) {
+    if (!panel) {
+      continue;
+    }
+
+    const trainParts = panel.split("|");
+    const lastPart = trainParts[trainParts.length - 1] ?? "";
+    const id = lastPart.split("&")[0]?.trim() ?? "";
+    const active = trainParts
+      .slice(0, -1)
+      .filter(Boolean)
+      .reduce((current, trainPart) => {
+        const status = trainPart.split(";")[0] ?? "";
+        return status === "1" || status === "2";
+      }, false);
+
+    if (active && id) {
+      output.push(id);
+    }
+  }
+
+  return output;
+}
+
+function isBilkomUrl(value: string) {
+  try {
+    return new URL(value).hostname === "bilkom.pl" || new URL(value).hostname.endsWith(".bilkom.pl");
+  } catch {
+    return false;
+  }
+}
+
+function unavailablePricing(bilkomBuyLink: string | null, regiojetBuyLink: string | null) {
+  return {
+    bilkomBuyLink,
+    regiojetBuyLink,
+    ticketPrice: null,
+    ticketPriceCurrency: null,
+    ticketPriceSource: null,
+    ticketPriceAvailable: false,
+  };
+}
+
+function inferNextDate(previousTime: string, nextTime: string, baseDate: string) {
+  if (!previousTime || !nextTime || compareTimes(nextTime, previousTime) >= 0) {
+    return baseDate;
+  }
+
+  return addDays(baseDate, 1);
+}
+
+function compareTimes(left: string, right: string) {
+  return cleanToken(left).localeCompare(cleanToken(right));
+}
+
+function addDays(date: string, days: number) {
+  const [day, month, year] = date.split(".").map((part) => Number.parseInt(part, 10));
+  const value = new Date(Date.UTC(year || 1970, (month || 1) - 1, day || 1));
+  value.setUTCDate(value.getUTCDate() + days);
+
+  const nextDay = String(value.getUTCDate()).padStart(2, "0");
+  const nextMonth = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const nextYear = String(value.getUTCFullYear());
+  return `${nextDay}.${nextMonth}.${nextYear}`;
+}
+
+function cleanToken(value: string) {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 export async function getStationBoard(input: {

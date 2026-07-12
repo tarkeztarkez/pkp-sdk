@@ -17,7 +17,7 @@ type BilkomJourneyLeg = {
   arrivalTime: string;
 };
 
-type BilkomJourneyPriceRequest = {
+export type BilkomJourneyPriceRequest = {
   id: string;
   tripId: string;
   offeredTrains: Array<{
@@ -123,6 +123,7 @@ type BilkomPriceResponse = {
 
 export type BilkomRoutePrice = {
   routeKey: string;
+  bilkomBuyLink: string | null;
   ticketPrice: number | null;
   ticketPriceCurrency: "PLN" | null;
   ticketPriceSource: "bilkom" | null;
@@ -176,6 +177,7 @@ export async function fetchBilkomRoutePrices(input: {
     const price = pricesById.get(journey.request.id) ?? null;
     return {
       routeKey: journey.routeKey,
+      bilkomBuyLink: buildBilkomBuyLink(journey.request),
       ticketPrice: price,
       ticketPriceCurrency: price === null ? null : "PLN",
       ticketPriceSource: price === null ? null : "bilkom",
@@ -315,6 +317,31 @@ export function buildBilkomRouteKey(input: {
     category,
     trainNumber,
   ].join("|");
+}
+
+export function buildBilkomBuyLink(request: BilkomJourneyPriceRequest): string | null {
+  const url = new URL("/koszyk/train", BILKOM_BASE_URL);
+
+  for (const [index, train] of request.offeredTrains.entries()) {
+    const date = train.departureDate.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})/);
+    const fromStation = train.departureStationCode.hafasId || train.stationIds[0];
+    const toStation = train.arrivalStationCode.hafasId || train.stationIds.at(-1);
+    if (!date || !fromStation || !toStation || !train.trainNumber) {
+      return null;
+    }
+
+    const prefix = `items[${index}]`;
+    url.searchParams.set(`${prefix}.date`, `${date[1]}${date[2]}${date[3]}${date[4]}${date[5]}`);
+    url.searchParams.set(`${prefix}.fromStation`, fromStation);
+    url.searchParams.set(`${prefix}.toStation`, toStation);
+    url.searchParams.set(`${prefix}.number`, train.trainNumber);
+  }
+
+  if (request.offeredTrains.length === 0) {
+    return null;
+  }
+  url.searchParams.set("cart", "true");
+  return url.toString();
 }
 
 export function parseBilkomJourneys(html: string): BilkomJourneyCandidate[] {

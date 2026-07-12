@@ -15,6 +15,16 @@ export type Station = {
   NZ?: string;
 };
 
+type PortalBuyTicketResponse =
+  | "blad"
+  | ""
+  | {
+      redirectType?: number;
+      url?: string;
+      answerKey?: string;
+      frm?: string;
+    };
+
 type ChallengeSolver = {
   path: string;
 };
@@ -90,6 +100,35 @@ export class PortalSession {
 
     const html = await this.getText(`/WynikiWyszukiwania?id=${encodeURIComponent(json.Ref)}`);
     return { ref: json.Ref, html };
+  }
+
+  async resolveBuyTicketUrl(buyTicketId: string, contrast = false): Promise<string | null> {
+    const criteria = buyTicketId.trim();
+    if (!criteria) {
+      return null;
+    }
+
+    const body = new URLSearchParams();
+    body.set("kryteria", criteria);
+    body.set("contrast", contrast ? "1" : "0");
+    body.set("__RequestVerificationToken", this.token);
+
+    const response = await this.fetch(new URL("/WynikiWyszukiwania/KupBilet", BASE_URL).toString(), {
+      method: "POST",
+      headers: this.buildAjaxHeaders({ includeBodyContentType: true }),
+      body: body.toString(),
+    });
+
+    const payload = await this.parseJson<PortalBuyTicketResponse>(response);
+    if (!payload || payload === "blad" || typeof payload === "string") {
+      return null;
+    }
+
+    if (payload.redirectType !== 2 || !payload.url) {
+      return null;
+    }
+
+    return payload.url;
   }
 
   async searchDelaysByStations(input: {

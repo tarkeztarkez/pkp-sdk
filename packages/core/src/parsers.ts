@@ -16,6 +16,8 @@ export type RouteResult = {
   duration: string;
   transfers: number;
   detailsUrl: string;
+  buyTicketStandardData: string;
+  buyTicketSharedData: string;
 };
 
 export type DelayResult = {
@@ -55,6 +57,7 @@ export function parseRoutes(html: string): RouteResult[] {
       const end = card.find(".search-results__item-times--end");
       const metaCol = card.find(".col-3.col-12--phone.inline-center.box--flex--column").first();
       const detailsUrl = card.find('a[href*="/WynikiWyszukiwania/SzczegolyPolaczenia"]').last().attr("href") ?? "";
+      const buyTicketButton = card.find(".buyTicket").first();
 
       return {
         departureStation: cleanText($(stations.get(1)).text()),
@@ -72,6 +75,8 @@ export function parseRoutes(html: string): RouteResult[] {
         duration: cleanVisibleText(card.find(".search-results__item-train-nr.txlc").first()),
         transfers: Number.parseInt(cleanText(card.find(".add-arrow-to-right-before strong").first().text()), 10) || 0,
         detailsUrl,
+        buyTicketStandardData: buyTicketButton.attr("data-buy-ticket-st") ?? "",
+        buyTicketSharedData: buyTicketButton.attr("data-buy-ticket-cm") ?? "",
       };
     });
 }

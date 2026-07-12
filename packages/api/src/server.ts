@@ -68,6 +68,7 @@ export function startServer(options: ServerOptions = {}) {
               arrival: booleanParam(url, "arrival"),
               minChange: numberParam(url, "minChange"),
               direct: booleanParam(url, "direct"),
+              maxPrice: floatParam(url, "maxPrice"),
             }),
           );
         }
@@ -82,6 +83,7 @@ export function startServer(options: ServerOptions = {}) {
               arrival: booleanParam(url, "arrival"),
               minChange: numberParam(url, "minChange"),
               direct: booleanParam(url, "direct"),
+              maxPrice: floatParam(url, "maxPrice"),
               grm: booleanParam(url, "grm"),
               carriageSvg: numberParam(url, "carriageSvg"),
             }),
@@ -228,9 +230,11 @@ function buildOpenApiDocument(host: string, port: number) {
             duration: { type: "string" },
             transfers: { type: "integer" },
             detailsUrl: { type: "string" },
+            bilkomBuyLink: { type: ["string", "null"] },
+            regiojetBuyLink: { type: ["string", "null"] },
             ticketPrice: { type: ["number", "null"] },
             ticketPriceCurrency: { type: ["string", "null"], enum: ["PLN", null] },
-            ticketPriceSource: { type: ["string", "null"], enum: ["bilkom", null] },
+            ticketPriceSource: { type: ["string", "null"], enum: ["bilkom", "regiojet", "bilkom+regiojet", null] },
             ticketPriceAvailable: { type: "boolean" },
           },
           required: [
@@ -249,6 +253,8 @@ function buildOpenApiDocument(host: string, port: number) {
             "duration",
             "transfers",
             "detailsUrl",
+            "bilkomBuyLink",
+            "regiojetBuyLink",
             "ticketPrice",
             "ticketPriceCurrency",
             "ticketPriceSource",
@@ -266,8 +272,9 @@ function buildOpenApiDocument(host: string, port: number) {
             departureMode: { type: "boolean" },
             minChangeMinutes: { type: "integer" },
             direct: { type: "boolean" },
+            maxPrice: { type: ["number", "null"] },
           },
-          required: ["from", "to", "date", "time", "departureMode", "minChangeMinutes", "direct"],
+          required: ["from", "to", "date", "time", "departureMode", "minChangeMinutes", "direct", "maxPrice"],
           additionalProperties: false,
         },
         RoutesResponse: {
@@ -604,6 +611,7 @@ function buildOpenApiDocument(host: string, port: number) {
             queryParam("arrival", "If true, search by arrival time instead of departure time", false, "boolean"),
             queryParam("minChange", "Minimum transfer time in minutes", false, "integer"),
             queryParam("direct", "If true, return direct connections only", false, "boolean"),
+            queryParam("maxPrice", "Maximum ticket price in PLN; routes without a price are still included", false, "number"),
           ],
           responses: successResponse("Route search results", "RoutesResponse"),
         },
@@ -620,6 +628,7 @@ function buildOpenApiDocument(host: string, port: number) {
             queryParam("arrival", "If true, search by arrival time instead of departure time", false, "boolean"),
             queryParam("minChange", "Minimum transfer time in minutes", false, "integer"),
             queryParam("direct", "If true, return direct connections only", false, "boolean"),
+            queryParam("maxPrice", "Maximum ticket price in PLN; routes without a price are still included", false, "number"),
             queryParam("grm", "If true, enrich the selected route with Bilkom GRM data", false, "boolean"),
             queryParam("carriageSvg", "Carriage number to fetch as an SVG string", false, "integer"),
           ],
@@ -693,7 +702,7 @@ function buildOpenApiDocument(host: string, port: number) {
   };
 }
 
-function queryParam(name: string, description: string, required = false, type: "string" | "integer" | "boolean" = "string") {
+function queryParam(name: string, description: string, required = false, type: "string" | "integer" | "boolean" | "number" = "string") {
   return {
     name,
     in: "query",
@@ -790,6 +799,19 @@ function numberParam(url: URL, key: string) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) {
     throw new Error(`Invalid integer format: ${key}`);
+  }
+  return parsed;
+}
+
+function floatParam(url: URL, key: string) {
+  const value = optionalParam(url, key);
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Invalid number format: ${key}`);
   }
   return parsed;
 }
